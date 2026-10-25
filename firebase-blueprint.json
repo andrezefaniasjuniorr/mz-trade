@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Dados da carteira e saldo virtual do trader moçambicano",
+      "type": "object",
+      "properties": {
+        "balance": {
+          "type": "number",
+          "description": "Saldo disponível em Meticais (MT)"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email do utilizador",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nome do utilizador",
+          "maxLength": 100
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Data e hora da última sincronização"
+        }
+      },
+      "required": ["balance"]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Publicação partilhada no feed da comunidade MZ Trade",
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "time": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "likes": {
+          "type": "number"
+        },
+        "comments": {
+          "type": "number"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["author", "content"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Perfil e carteira do utilizador"
+    },
+    "/community_posts/{postId}": {
+      "schema": {
+        "$ref": "#/entities/CommunityPost"
+      },
+      "description": "Feed público de posts dos investidores"
+    }
+  }
+}

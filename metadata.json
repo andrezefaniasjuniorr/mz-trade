@@ -1,0 +1,6 @@
+{
+  "name": "MZ Trade - Bolsa Virtual de Mercadorias de Moçambique",
+  "description": "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities moçambicanas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
