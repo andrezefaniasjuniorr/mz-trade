@@ -14,11 +14,10 @@ import {
   ArrowRight,
   AlertCircle,
   CheckCircle,
-  Gift,
   ShieldCheck,
   UserPlus,
   LogOut,
-  TrendingUp
+  Wallet
 } from 'lucide-react';
 import { useAuth, MOZAMBIQUE_PROVINCES } from '@/context/AuthContext';
 
@@ -89,7 +88,7 @@ export default function RegisterPage() {
       setIsSuccess(true);
       setTimeout(() => {
         router.push('/');
-      }, 1000);
+      }, 1200);
     }
   };
 
@@ -101,12 +100,12 @@ export default function RegisterPage() {
         <div className="text-center mb-6">
           <Link href="/" prefetch={true} className="inline-flex items-center space-x-3 group">
             <div className="w-12 h-12 bg-blue-600 group-hover:bg-blue-700 text-white rounded-2xl flex items-center justify-center font-black tracking-widest text-xl shadow-lg shadow-blue-200 transition">
-              MZ
+              TR
             </div>
             <div className="text-left">
-              <span className="text-2xl font-black text-slate-900 tracking-tight block">MZ TRADE</span>
+              <span className="text-2xl font-black text-slate-900 tracking-tight block">TapRise</span>
               <span className="text-xs text-blue-600 font-bold uppercase tracking-wider block">
-                Bolsa Virtual de Moçambique
+                Bolsa e Mercadorias
               </span>
             </div>
           </Link>
@@ -114,7 +113,7 @@ export default function RegisterPage() {
             Registe a sua Conta de Investidor
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            Crie a sua conta de operações para receber 1.000,00 MT de capital institucional e aceder ao mercado.
+            Crie a sua conta de operações. O saldo inicial é atribuído pela Administração da Mesa de Operações.
           </p>
         </div>
 
@@ -133,13 +132,13 @@ export default function RegisterPage() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     onClick={() => router.push('/')}
-                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-xs text-xs"
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-xs text-xs cursor-pointer"
                   >
-                    Ir para o Terminal MZ TRADE
+                    Ir para o Terminal TapRise
                   </button>
                   <button
                     onClick={handleSwitchAccount}
-                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition text-xs flex items-center gap-1.5"
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition text-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                     <span>Criar Outra Conta (Desconectar)</span>
@@ -156,21 +155,21 @@ export default function RegisterPage() {
             <CheckCircle className="w-10 h-10 text-emerald-600 mx-auto" />
             <h3 className="text-base font-black text-emerald-900">Conta Criada com Sucesso!</h3>
             <p className="text-xs text-emerald-700 font-medium">
-              1.000,00 MT creditados na sua conta. A redirecionar para a plataforma...
+              Conta registada (0,00 MT iniciais). O Administrador foi notificado para creditar o seu saldo. A redirecionar para a plataforma...
             </p>
           </div>
         )}
 
-        {/* Welcome Bonus Card */}
+        {/* Info Card: Initial 0 MT Balance & Admin Control */}
         {(!isAlreadyRegistered || isSuccess) && (
-          <div className="mb-4 bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-4 text-white shadow-md flex items-center space-x-3">
-            <div className="p-2.5 bg-white/20 rounded-xl backdrop-blur-xs shrink-0">
-              <Gift className="w-6 h-6 text-amber-300" />
+          <div className="mb-4 bg-gradient-to-r from-slate-900 to-blue-950 rounded-2xl p-4 text-white shadow-md flex items-center space-x-3 border border-slate-800">
+            <div className="p-2.5 bg-blue-600/30 rounded-xl backdrop-blur-xs shrink-0 text-blue-300">
+              <Wallet className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-bold text-blue-100 uppercase tracking-wider">Abertura de Conta</p>
-              <p className="text-sm font-black">
-                1.000,00 MT de capital institucional creditados automaticamente
+              <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">Abertura de Conta Supervisionada</p>
+              <p className="text-xs font-semibold text-slate-200">
+                A sua conta inicia com 0,00 MT. O saldo operacional é creditado e gerido pelo Administrador da plataforma.
               </p>
             </div>
           </div>
@@ -250,7 +249,7 @@ export default function RegisterPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
                     title={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -314,7 +313,7 @@ export default function RegisterPage() {
               <div className="p-3 bg-blue-50/70 rounded-2xl border border-blue-100 text-[11px] text-blue-900 flex items-start space-x-2">
                 <CheckCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                 <span>
-                  Ao registar-se, confirma que tem 18 anos ou mais e aceita os termos operacionais da Bolsa Virtual de Moçambique MZ TRADE.
+                  Ao registar-se, confirma que tem 18 anos ou mais e aceita os termos operacionais da plataforma TapRise.
                 </span>
               </div>
 
@@ -326,7 +325,7 @@ export default function RegisterPage() {
                   className="w-full flex items-center justify-center space-x-2 py-3.5 px-4 border border-transparent rounded-2xl shadow-md text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition disabled:opacity-50 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>{isSubmitting ? 'A processar abertura de conta...' : 'Criar Conta e Obter 1.000,00 MT'}</span>
+                  <span>{isSubmitting ? 'A processar abertura de conta...' : 'Criar Conta de Investidor'}</span>
                   {!isSubmitting && <ArrowRight className="w-4 h-4" />}
                 </button>
               </div>
@@ -350,7 +349,7 @@ export default function RegisterPage() {
             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
             Ambiente Seguro • Encriptação Institucional 256-bit
           </p>
-          <p>MZ TRADE • Bolsa de Mercadorias de Moçambique</p>
+          <p>TapRise • Bolsa de Mercadorias de Moçambique</p>
         </div>
 
       </div>

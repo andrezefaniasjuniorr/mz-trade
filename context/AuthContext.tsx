@@ -14,9 +14,12 @@ import {
   doc,
   getDoc,
   setDoc,
+  onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db } from '@/src/firebase';
+
+export const ADMIN_EMAIL = 'garotoestranho454@gmail.com';
 
 export interface UserProfile {
   uid: string;
@@ -25,7 +28,9 @@ export interface UserProfile {
   idade: number;
   provincia: string;
   saldoVirtual: number;
+  balance?: number;
   patrimonioTotal: number;
+  lastClaimDate?: string;
   criadoEm?: unknown;
   atualizadoEm?: unknown;
 }
@@ -50,6 +55,7 @@ interface AuthContextType {
   user: FirebaseUser | null;
   userProfile: UserProfile | null;
   loading: boolean;
+  isAdmin: boolean;
   register: (
     email: string,
     pass: string,
@@ -79,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // REGRA 1: Acesso exclusivo para o e-mail exato
+  const isAdmin = user?.email === ADMIN_EMAIL;
+
   // Helper to get cached profile instantly from localStorage
   const getCachedProfile = (uid: string): UserProfile | null => {
     if (typeof window === 'undefined') return null;
@@ -100,17 +109,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // Helper to fetch user document with non-blocking timeout fallback
+  // REGRA NOVA: Todas as contas devem iniciar sem saldo nenhum com 0 MT
   const fetchUserProfile = useCallback(async (uid: string, fallbackEmail = '', fallbackName = ''): Promise<UserProfile> => {
     const cached = getCachedProfile(uid);
 
     const defaultFallback: UserProfile = cached || {
       uid,
-      nome: fallbackName || 'Investidor MZ TRADE',
-      email: fallbackEmail || 'investidor@mztrade.co.mz',
+      nome: fallbackName || 'Investidor TapRise',
+      email: fallbackEmail || 'investidor@taprise.co.mz',
       idade: 21,
       provincia: 'Maputo Cidade',
-      saldoVirtual: 1000.0,
-      patrimonioTotal: 1000.0
+      saldoVirtual: 0.0,
+      balance: 0.0,
+      patrimonioTotal: 0.0
     };
 
     try {
@@ -120,29 +131,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (snapshot && snapshot.exists()) {
         const data = snapshot.data();
+        const currentBalance = typeof data.balance === 'number'
+          ? data.balance
+          : (typeof data.saldoVirtual === 'number' ? data.saldoVirtual : 0.0);
+
         const profile: UserProfile = {
           uid,
           nome: data.nome || fallbackName || defaultFallback.nome,
           email: data.email || fallbackEmail || defaultFallback.email,
           idade: typeof data.idade === 'number' ? data.idade : defaultFallback.idade,
           provincia: data.provincia || defaultFallback.provincia,
-          saldoVirtual: typeof data.saldoVirtual === 'number' ? data.saldoVirtual : defaultFallback.saldoVirtual,
-          patrimonioTotal: typeof data.patrimonioTotal === 'number' ? data.patrimonioTotal : defaultFallback.patrimonioTotal,
+          saldoVirtual: currentBalance,
+          balance: currentBalance,
+          patrimonioTotal: typeof data.patrimonioTotal === 'number' ? data.patrimonioTotal : currentBalance,
+          lastClaimDate: data.lastClaimDate || '',
           criadoEm: data.criadoEm,
           atualizadoEm: data.atualizadoEm
         };
         saveCachedProfile(profile);
         return profile;
       } else if (snapshot && !snapshot.exists()) {
-        // Document doesn't exist yet, seed it in background
+        // Document doesn't exist yet, seed it with 0.00 MT initial balance
         const newProfile: UserProfile = {
           uid,
-          nome: fallbackName || 'Investidor MZ TRADE',
-          email: fallbackEmail || 'investidor@mztrade.co.mz',
+          nome: fallbackName || 'Investidor TapRise',
+          email: fallbackEmail || 'investidor@taprise.co.mz',
           idade: 21,
           provincia: 'Maputo Cidade',
-          saldoVirtual: 1000.0,
-          patrimonioTotal: 1000.0
+          saldoVirtual: 0.0,
+          balance: 0.0,
+          patrimonioTotal: 0.0
         };
         saveCachedProfile(newProfile);
         setDoc(userRef, {
@@ -161,9 +179,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen to auth state changes across all sessions / devices
   useEffect(() => {
     let isMounted = true;
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let unsubscribeDoc: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       if (!isMounted) return;
       setUser(currentUser);
+
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = null;
+      }
 
       if (currentUser) {
         // Check local cache for immediate display
@@ -173,7 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false); // Unblock UI immediately!
         }
 
-        // Fetch or sync profile in background
+        // 1. Initial fetch
         fetchUserProfile(
           currentUser.uid,
           currentUser.email || '',
@@ -184,6 +209,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
           }
         });
+
+        // 2. Real-time Firestore snapshot listener:
+        // Quando o admin adiciona saldo no painel (/admin), reflete no usuário em tempo real!
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          unsubscribeDoc = onSnapshot(userDocRef, (snap) => {
+            if (snap.exists() && isMounted) {
+              const data = snap.data();
+              const latestBalance = typeof data.balance === 'number'
+                ? data.balance
+                : (typeof data.saldoVirtual === 'number' ? data.saldoVirtual : 0.0);
+
+              setUserProfile((prev) => {
+                const updated: UserProfile = {
+                  uid: currentUser.uid,
+                  nome: data.nome || prev?.nome || 'Investidor TapRise',
+                  email: data.email || prev?.email || currentUser.email || '',
+                  idade: typeof data.idade === 'number' ? data.idade : (prev?.idade || 21),
+                  provincia: data.provincia || prev?.provincia || 'Maputo Cidade',
+                  saldoVirtual: latestBalance,
+                  balance: latestBalance,
+                  patrimonioTotal: typeof data.patrimonioTotal === 'number' ? data.patrimonioTotal : latestBalance,
+                  lastClaimDate: data.lastClaimDate || prev?.lastClaimDate || '',
+                  criadoEm: data.criadoEm || prev?.criadoEm,
+                  atualizadoEm: data.atualizadoEm || prev?.atualizadoEm
+                };
+                saveCachedProfile(updated);
+                return updated;
+              });
+            }
+          });
+        } catch (e) {
+          console.warn('Erro ao ligar listener em tempo real do perfil:', e);
+        }
       } else {
         setUserProfile(null);
         setLoading(false);
@@ -192,11 +251,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       isMounted = false;
-      unsubscribe();
+      unsubscribeAuth();
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+      }
     };
   }, [fetchUserProfile]);
 
-  // CADASTRO / REGISTRO
+  // CADASTRO / REGISTRO COM 0.00 MT DE SALDO INICIAL
   const register = async (
     email: string,
     pass: string,
@@ -247,15 +309,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ignora falha cosmética de displayName
       }
 
-      // 3. Estruturar perfil inicial
+      // 3. Estruturar perfil inicial COM 0.00 MT DE SALDO (controle total do admin)
       const initialProfile: UserProfile = {
         uid: newUser.uid,
         nome: nome.trim(),
         email: email.trim(),
         idade: Number(idade),
         provincia: provincia || 'Maputo Cidade',
-        saldoVirtual: 1000.0,
-        patrimonioTotal: 1000.0
+        saldoVirtual: 0.0,
+        balance: 0.0,
+        patrimonioTotal: 0.0
       };
 
       // Guardar na cache local para resposta ultra-rápida
@@ -263,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(newUser);
       setUserProfile(initialProfile);
 
-      // 4. Gravar na base de dados (com timeout não bloqueante para o utilizador nunca ficar retido)
+      // 4. Gravar na base de dados
       const userRef = doc(db, 'users', newUser.uid);
       setDoc(userRef, {
         ...initialProfile,
@@ -305,7 +368,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
 
-      // If user was anonymous guest, clean sign out first
       if (auth.currentUser && auth.currentUser.isAnonymous) {
         try {
           await signOut(auth);
@@ -351,7 +413,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ENTRAR COMO VISITANTE CONVIDADO
+  // ENTRAR COMO VISITANTE CONVIDADO (COM 0 MT DE SALDO INICIAL)
   const loginGuest = async (): Promise<{ success: boolean; error?: string }> => {
     try {
       setLoading(true);
@@ -360,7 +422,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const profile = await fetchUserProfile(
         currentUser.uid,
-        'convidado@mztrade.co.mz',
+        'convidado@taprise.co.mz',
         'Investidor Convidado'
       );
 
@@ -398,6 +460,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const updated: UserProfile = {
         ...prev,
         saldoVirtual: Number(saldo.toFixed(2)),
+        balance: Number(saldo.toFixed(2)),
         patrimonioTotal: typeof patrimonio === 'number' ? Number(patrimonio.toFixed(2)) : prev.patrimonioTotal
       };
       saveCachedProfile(updated);
@@ -408,6 +471,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userRef = doc(db, 'users', user.uid);
       const updateData: Record<string, unknown> = {
         saldoVirtual: Number(saldo.toFixed(2)),
+        balance: Number(saldo.toFixed(2)),
         atualizadoEm: serverTimestamp()
       };
       if (typeof patrimonio === 'number') {
@@ -432,6 +496,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         userProfile,
         loading,
+        isAdmin,
         register,
         login,
         loginGuest,

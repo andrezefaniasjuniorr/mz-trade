@@ -75,13 +75,13 @@ export default function LoginPage() {
         {/* Header Branding */}
         <div className="text-center mb-8">
           <Link href="/" prefetch={true} className="inline-flex items-center space-x-3 group">
-            <div className="w-12 h-12 bg-blue-600 group-hover:bg-blue-700 text-white rounded-2xl flex items-center justify-center font-black tracking-widest text-xl shadow-lg shadow-blue-200 transition">
-              MZ
+            <div className="w-12 h-12 bg-blue-600 group-hover:bg-blue-700 text-white rounded-2xl flex items-center justify-center font-black tracking-widest text-lg shadow-lg shadow-blue-200 transition">
+              TR
             </div>
             <div className="text-left">
-              <span className="text-2xl font-black text-slate-900 tracking-tight block">MZ TRADE</span>
+              <span className="text-2xl font-black text-slate-900 tracking-tight block">TapRise</span>
               <span className="text-xs text-blue-600 font-bold uppercase tracking-wider block">
-                Bolsa Virtual de Moçambique
+                Bolsa e Mercadorias
               </span>
             </div>
           </Link>
@@ -120,7 +120,7 @@ export default function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="exemplo@mztrade.co.mz"
+                  placeholder="exemplo@taprise.co.mz"
                   className="block w-full pl-10 pr-3 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
                 />
               </div>
@@ -208,9 +208,9 @@ export default function LoginPage() {
                 Criar Conta Gratuita
               </Link>
             </p>
-            <div className="mt-3 inline-flex items-center space-x-1 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[11px] font-bold border border-emerald-200">
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>Receba 1.000,00 MT de capital institucional inicial</span>
+            <div className="mt-3 inline-flex items-center space-x-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-[11px] font-bold border border-blue-200">
+              <CheckCircle className="w-3.5 h-3.5 text-blue-600" />
+              <span>Abertura de conta oficial supervisionada pela mesa</span>
             </div>
           </div>
         </div>
@@ -221,7 +221,7 @@ export default function LoginPage() {
             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
             Ambiente Seguro e Protegido • Encriptação de Alta Segurança 256-bit
           </p>
-          <p>MZ TRADE • Bolsa de Mercadorias de Moçambique</p>
+          <p>TapRise • Bolsa de Mercadorias de Moçambique</p>
         </div>
 
       </div>

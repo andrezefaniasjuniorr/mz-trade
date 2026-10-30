@@ -2,17 +2,18 @@ import type {Metadata} from 'next';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
-  title: 'MZ Trade - Bolsa Virtual de Mercadorias de Moçambique',
-  description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities moçambicanas.',
+  title: 'TapRise - Bolsa e Mercadorias de Moçambique',
+  description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.',
+  manifest: '/manifest.json',
   openGraph: {
-    title: 'MZ Trade - Bolsa Virtual de Mercadorias de Moçambique',
-    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities moçambicanas.',
+    title: 'TapRise - Bolsa e Mercadorias de Moçambique',
+    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'MZ Trade - Bolsa Virtual de Mercadorias de Moçambique',
-    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities moçambicanas.',
+    title: 'TapRise - Bolsa e Mercadorias de Moçambique',
+    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.',
   },
 };
 

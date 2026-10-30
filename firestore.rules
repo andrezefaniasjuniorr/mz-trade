@@ -2,46 +2,114 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'garotoestranho454@gmail.com';
     }
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Default deny all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Users collection: only owner can read and write their own profile, balance, and trades
+    // Users collection
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow create, update: if isOwner(userId);
-      allow delete: if false;
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
 
-      // Subcollections for positions and trades
       match /positions/{positionId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       match /trade_history/{tradeId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
     }
 
-    // Community posts: readable by all, writable when authenticated
-    match /community_posts/{postId} {
+    // Usuarios collection (synchronized with users)
+    match /usuarios/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Config collection (e.g., config/dicaInstrutor)
+    match /config/{configId} {
       allow read: if true;
+      allow write: if isAdmin() || isSignedIn();
+    }
+
+    // V3 Chat Collections: taprise_group_messages, taprise_presence, taprise_typing
+    match /taprise_group_messages/{messageId} {
+      allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isAdmin();
+
+      match /reactions/{reactionId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    match /taprise_presence/{userId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /taprise_typing/{userId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Private Chats (User <-> Admin)
+    match /private_chats/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+
+      match /messages/{messageId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Chat Global messages legacy
+    match /chats/{chatId}/messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /chats/{chatId}/typing/{userId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Admin configs (market hours, daily, chat pinned message, announcement)
+    match /admin_config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || isSignedIn();
+    }
+
+    // Transactions & withdrawals & orders
+    match /transactions/{txId} {
+      allow read, write: if isSignedIn();
+    }
+    match /withdrawals/{wId} {
+      allow read, write: if isSignedIn();
+    }
+    match /orders/{orderId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Community posts
+    match /community_posts/{postId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /system/{docId} {
+      allow read, write: if true;
     }
   }
 }
