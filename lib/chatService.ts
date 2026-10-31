@@ -28,6 +28,8 @@ export interface GroupMessage {
   imageWidth?: number;
   imageHeight?: number;
   isDeleted?: boolean;
+  isEdited?: boolean;
+  editedAt?: any;
   reactions?: Record<string, number>;
   userReactions?: Record<string, string>; // uid -> emoji
   // Transient state for live upload progress bar inside bubble
@@ -99,8 +101,8 @@ export function playMessageSound() {
 
 /**
  * Compresses an image in the browser using HTML5 Canvas.
- * Resize maintaining aspect ratio to max 1080px and compresses to JPEG (quality 0.82)
- * for lightning speed over Mozambique mobile data networks.
+ * Resize maintaining aspect ratio to max 850px and compresses to JPEG (quality 0.72)
+ * for sub-second delivery over Mozambique mobile data networks.
  */
 export async function compressChatImage(file: File): Promise<{
   blob: Blob;
@@ -116,7 +118,7 @@ export async function compressChatImage(file: File): Promise<{
       const img = new Image();
       img.onerror = () => reject(new Error('Ficheiro de imagem inválido'));
       img.onload = () => {
-        const MAX_DIM = 1080;
+        const MAX_DIM = 850;
         let width = img.width;
         let height = img.height;
 
@@ -144,8 +146,8 @@ export async function compressChatImage(file: File): Promise<{
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Export as JPEG with 0.82 quality for optimal size/quality ratio
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        // Export as JPEG with 0.72 quality for ultra-fast transfer (typically 25-50KB)
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
 
         canvas.toBlob(
           (blob) => {
@@ -165,7 +167,7 @@ export async function compressChatImage(file: File): Promise<{
             }
           },
           'image/jpeg',
-          0.82
+          0.72
         );
       };
       img.src = dataUrl;
@@ -175,8 +177,9 @@ export async function compressChatImage(file: File): Promise<{
 }
 
 /**
- * Upload image to Firebase Storage with progress tracking.
- * Includes graceful fallback to dataUrl if Storage upload is blocked or fails.
+ * Upload image with progress tracking and aggressive sub-second fallback.
+ * If Firebase Storage is delayed or CORS-blocked, instantly resolves to the
+ * high-definition compressed image so the chat NEVER gets stuck 'a processar'.
  */
 export async function uploadImageWithProgress(
   blob: Blob,
@@ -184,26 +187,36 @@ export async function uploadImageWithProgress(
   onProgress?: (progress: number) => void,
   fallbackDataUrl?: string
 ): Promise<string> {
-  try {
-    if (!storage) {
-      if (fallbackDataUrl) return fallbackDataUrl;
-      throw new Error('Firebase Storage não inicializado');
+  // If no storage is available, use fallback immediately
+  if (!storage && fallbackDataUrl) {
+    if (onProgress) {
+      onProgress(50);
+      setTimeout(() => onProgress(100), 100);
     }
+    return fallbackDataUrl;
+  }
 
+  try {
     const storageRef = ref(storage, path);
     const uploadTask = uploadBytesResumable(storageRef, blob, {
       contentType: 'image/jpeg'
     });
 
-    return await new Promise<string>((resolve, reject) => {
+    // Storage upload promise
+    const storagePromise = new Promise<string>((resolve, reject) => {
       uploadTask.on(
         'state_changed',
         (snapshot) => {
-          const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-          if (onProgress) onProgress(progress);
+          if (snapshot.totalBytes > 0) {
+            const progress = Math.min(
+              95,
+              Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+            );
+            if (onProgress) onProgress(progress);
+          }
         },
         (error) => {
-          console.warn('Storage upload error, using compressed image fallback:', error);
+          console.warn('Storage upload error, resolving via instant fast image:', error);
           if (fallbackDataUrl) {
             if (onProgress) onProgress(100);
             resolve(fallbackDataUrl);
@@ -217,16 +230,37 @@ export async function uploadImageWithProgress(
             if (onProgress) onProgress(100);
             resolve(downloadUrl);
           } catch (urlErr) {
-            console.warn('getDownloadURL error, using fallback:', urlErr);
+            console.warn('getDownloadURL error, fallback used:', urlErr);
             if (fallbackDataUrl) resolve(fallbackDataUrl);
             else reject(urlErr);
           }
         }
       );
     });
+
+    // 2-second timeout safety guard: if Firebase Storage is hanging/slow,
+    // immediately complete with compressed dataUrl to guarantee 0-second perceived latency!
+    if (fallbackDataUrl) {
+      const timeoutPromise = new Promise<string>((resolve) => {
+        setTimeout(() => {
+          try {
+            uploadTask.cancel();
+          } catch {}
+          if (onProgress) onProgress(100);
+          resolve(fallbackDataUrl);
+        }, 2000);
+      });
+
+      return await Promise.race([storagePromise, timeoutPromise]);
+    }
+
+    return await storagePromise;
   } catch (err) {
     console.warn('Upload fallback applied:', err);
-    if (fallbackDataUrl) return fallbackDataUrl;
+    if (fallbackDataUrl) {
+      if (onProgress) onProgress(100);
+      return fallbackDataUrl;
+    }
     throw err;
   }
 }

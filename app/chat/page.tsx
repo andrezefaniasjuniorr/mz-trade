@@ -25,7 +25,9 @@ import {
   MessageSquare,
   ShieldCheck,
   Sparkles,
-  Loader2
+  Loader2,
+  Pencil,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
@@ -138,6 +140,7 @@ interface GroupMessageItemProps {
   isAdmin: boolean;
   onReply: (msg: GroupMessage) => void;
   onDelete: (id: string) => void;
+  onEdit?: (msg: GroupMessage) => void;
   onReact: (msg: GroupMessage, emoji: string) => void;
   onScrollToReply: (replyId: string) => void;
   onOpenImage: (url: string, caption?: string, author?: string, time?: string) => void;
@@ -150,6 +153,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
   isAdmin,
   onReply,
   onDelete,
+  onEdit,
   onReact,
   onScrollToReply,
   onOpenImage,
@@ -317,10 +321,19 @@ const GroupMessageItem = memo(function GroupMessageItem({
           {/* Texto principal */}
           {msg.isDeleted ? (
             <p className="italic text-slate-400 text-[11px] flex items-center gap-1.5">
-              <span>Esta mensagem foi removida pela administração.</span>
+              <span>Esta mensagem foi removida.</span>
             </p>
           ) : (
-            msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>
+            msg.text && (
+              <div className="space-y-0.5">
+                <p className="whitespace-pre-wrap">{msg.text}</p>
+                {msg.isEdited && (
+                  <span className={`text-[10px] italic block text-right font-mono ${isMe ? 'text-blue-200/80' : 'text-slate-400'}`}>
+                    (editada)
+                  </span>
+                )}
+              </div>
+            )
           )}
 
           {/* Rodapé: Horário + Check duplo */}
@@ -363,7 +376,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
         {/* Hover action bar */}
         {!msg.isDeleted && (
           <div
-            className={`flex items-center gap-1 text-[11px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1 px-1 ${
+            className={`flex items-center gap-1 text-[11px] text-slate-400 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mt-1 px-1 ${
               isMe ? 'justify-end' : 'justify-start'
             }`}
           >
@@ -403,22 +416,36 @@ const GroupMessageItem = memo(function GroupMessageItem({
             <button
               type="button"
               onClick={() => onReply(msg)}
-              className="hover:text-blue-400 flex items-center gap-0.5 cursor-pointer ml-1.5"
+              className="hover:text-blue-400 flex items-center gap-0.5 cursor-pointer ml-1"
               title="Responder com citação"
             >
               <Reply className="w-3 h-3" />
               <span>Responder</span>
             </button>
 
-            {isAdmin && (
+            {/* Usuário pode editar apenas as suas próprias mensagens de texto */}
+            {isMe && msg.type !== 'image' && onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(msg)}
+                className="text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-0.5 cursor-pointer ml-1 transition"
+                title="Editar minha mensagem"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>Editar</span>
+              </button>
+            )}
+
+            {/* Admin pode apagar qualquer mensagem; Usuários só podem apagar a sua própria */}
+            {(isAdmin || isMe) && (
               <button
                 type="button"
                 onClick={() => onDelete(msg.id)}
-                className="text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-0.5 cursor-pointer ml-1.5"
-                title="Remover mensagem"
+                className="text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-0.5 cursor-pointer ml-1 transition"
+                title={isAdmin ? (isMe ? 'Apagar minha mensagem' : 'Apagar mensagem para todos (Ação Admin)') : 'Apagar minha mensagem'}
               >
                 <Trash2 className="w-3 h-3" />
-                <span>Apagar</span>
+                <span>{isAdmin && !isMe ? 'Apagar (Admin)' : 'Apagar'}</span>
               </button>
             )}
           </div>
@@ -568,6 +595,7 @@ export default function ChatPage() {
   const [isSending, setIsSending] = useState<boolean>(false);
   const [cooldown, setCooldown] = useState<number>(0);
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<GroupMessage | null>(null);
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState<boolean>(false);
@@ -1002,18 +1030,45 @@ export default function ChatPage() {
     }
   };
 
-  // ENVIAR MENSAGEM NO GRUPO (TEXTO OU IMAGEM COM PROGRESSO NO BALÃO)
+  // ENVIAR MENSAGEM NO GRUPO (TEXTO, EDIÇÃO OU IMAGEM COM PROGRESSO NO BALÃO)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((!inputText.trim() && !pendingImage) || isSending) return;
-    if (cooldown > 0 && !isAdmin) {
-      showToast(`Aguarde ${cooldown}s para enviar outra mensagem.`, 'info');
-      return;
-    }
 
     if (!user) {
       showToast('Por favor, inicie sessão para participar no grupo.', 'error');
       router.push('/login');
+      return;
+    }
+
+    // 0. Modo de Edição da própria mensagem
+    if (editingMessage) {
+      if (!inputText.trim()) {
+        showToast('A mensagem não pode ficar vazia.', 'error');
+        return;
+      }
+      try {
+        setIsSending(true);
+        const msgRef = doc(db, 'taprise_group_messages', editingMessage.id);
+        await updateDoc(msgRef, {
+          text: inputText.trim().slice(0, 500),
+          isEdited: true,
+          editedAt: serverTimestamp()
+        });
+        showToast('Mensagem editada com sucesso!', 'success');
+        setEditingMessage(null);
+        setInputText('');
+      } catch (err: any) {
+        console.error('Erro ao editar mensagem:', err);
+        showToast('Falha ao editar mensagem.', 'error');
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
+
+    if (cooldown > 0 && !isAdmin) {
+      showToast(`Aguarde ${cooldown}s para enviar outra mensagem.`, 'info');
       return;
     }
 
@@ -1045,7 +1100,7 @@ export default function ChatPage() {
           imageHeight: imageToSend.height,
           createdAt: new Date(),
           isUploading: true,
-          uploadProgress: 15
+          uploadProgress: 35
         };
 
         setMessages((prev) => [...prev, optimisticMsg]);
@@ -1057,39 +1112,41 @@ export default function ChatPage() {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 60);
 
-        // Upload com progresso
-        const storagePath = `group_images/${user.uid}_${Date.now()}.jpg`;
-        const downloadUrl = await uploadImageWithProgress(
-          imageToSend.blob,
-          storagePath,
-          (progress) => {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === tempId ? { ...m, uploadProgress: progress } : m))
-            );
-          },
-          imageToSend.dataUrl
-        );
+        try {
+          // Upload rápido com timeout de 2s e fallback garantido (sem travar)
+          const storagePath = `group_images/${user.uid}_${Date.now()}.jpg`;
+          const downloadUrl = await uploadImageWithProgress(
+            imageToSend.blob,
+            storagePath,
+            (progress) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === tempId ? { ...m, uploadProgress: progress } : m))
+              );
+            },
+            imageToSend.dataUrl
+          );
 
-        // Salvar no Firestore taprise_group_messages
-        await addDoc(collection(db, 'taprise_group_messages'), {
-          uid: user.uid,
-          displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
-          email: user.email || '',
-          isAdmin,
-          text: textToSend,
-          type: 'image',
-          imageUrl: downloadUrl,
-          imageWidth: imageToSend.width,
-          imageHeight: imageToSend.height,
-          replyToId: replyTarget ? replyTarget.id : null,
-          isDeleted: false,
-          reactions: {},
-          userReactions: {},
-          createdAt: serverTimestamp()
-        });
-
-        // Remove msg temporária após upload
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+          // Salvar no Firestore taprise_group_messages
+          await addDoc(collection(db, 'taprise_group_messages'), {
+            uid: user.uid,
+            displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
+            email: user.email || '',
+            isAdmin,
+            text: textToSend,
+            type: 'image',
+            imageUrl: downloadUrl,
+            imageWidth: imageToSend.width,
+            imageHeight: imageToSend.height,
+            replyToId: replyTarget ? replyTarget.id : null,
+            isDeleted: false,
+            reactions: {},
+            userReactions: {},
+            createdAt: serverTimestamp()
+          });
+        } finally {
+          // Limpa mensagem temporária com segurança em qualquer cenário
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        }
       } else {
         // Envio de texto normal
         await addDoc(collection(db, 'taprise_group_messages'), {
@@ -1164,7 +1221,7 @@ export default function ChatPage() {
           createdAt: new Date(),
           read: false,
           isUploading: true,
-          uploadProgress: 20
+          uploadProgress: 35
         };
 
         setPrivateMessages((prev) => [...prev, optimisticMsg]);
@@ -1175,19 +1232,21 @@ export default function ChatPage() {
           privateEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
 
-        const storagePath = `private_images/${targetUid}_${Date.now()}.jpg`;
-        downloadUrl = await uploadImageWithProgress(
-          imageToSend.blob,
-          storagePath,
-          (progress) => {
-            setPrivateMessages((prev) =>
-              prev.map((m) => (m.id === tempId ? { ...m, uploadProgress: progress } : m))
-            );
-          },
-          imageToSend.dataUrl
-        );
-
-        setPrivateMessages((prev) => prev.filter((m) => m.id !== tempId));
+        try {
+          const storagePath = `private_images/${targetUid}_${Date.now()}.jpg`;
+          downloadUrl = await uploadImageWithProgress(
+            imageToSend.blob,
+            storagePath,
+            (progress) => {
+              setPrivateMessages((prev) =>
+                prev.map((m) => (m.id === tempId ? { ...m, uploadProgress: progress } : m))
+              );
+            },
+            imageToSend.dataUrl
+          );
+        } finally {
+          setPrivateMessages((prev) => prev.filter((m) => m.id !== tempId));
+        }
       } else {
         setPrivateInputText('');
       }
@@ -1288,28 +1347,63 @@ export default function ChatPage() {
     [user, userProfile, showToast]
   );
 
-  // Apagar Mensagem (Admin)
+  // Apagar Mensagem: Admin pode apagar qualquer mensagem para todos; Usuários só podem apagar a sua própria
   const handleDeleteMessage = useCallback(
     async (msgId: string) => {
-      if (!isAdmin) return;
-      if (!confirm('Deseja remover esta mensagem para todos os investidores?')) return;
+      const msg = messages.find((m) => m.id === msgId);
+      const isMyMessage = msg && msg.uid === user?.uid;
+
+      if (!isAdmin && !isMyMessage) {
+        showToast('Você só pode apagar as suas próprias mensagens.', 'error');
+        return;
+      }
+
+      const confirmText = isAdmin && !isMyMessage
+        ? 'Deseja apagar esta mensagem para todos os participantes do grupo (Ação Admin)?'
+        : 'Deseja apagar a sua mensagem?';
+
+      if (!confirm(confirmText)) return;
 
       try {
         const msgRef = doc(db, 'taprise_group_messages', msgId);
-        await updateDoc(msgRef, {
-          isDeleted: true,
-          text: 'Esta mensagem foi removida pela administração.'
-        });
-        showToast('Mensagem removida com sucesso.', 'success');
-      } catch (err) {
-        console.error('Erro ao remover mensagem:', err);
-        showToast('Falha ao remover mensagem.', 'error');
+        // Exclusão definitiva para remover para todos em tempo real
+        await deleteDoc(msgRef);
+        showToast(isAdmin && !isMyMessage ? 'Mensagem apagada para todos com sucesso.' : 'Sua mensagem foi apagada.', 'success');
+      } catch (err: any) {
+        console.warn('Erro ao apagar com deleteDoc, aplicando soft delete:', err);
+        try {
+          const msgRef = doc(db, 'taprise_group_messages', msgId);
+          await updateDoc(msgRef, {
+            isDeleted: true,
+            text: 'Esta mensagem foi removida.'
+          });
+          showToast('Mensagem removida com sucesso.', 'success');
+        } catch (updateErr) {
+          console.error('Erro ao remover mensagem:', updateErr);
+          showToast('Falha ao apagar mensagem.', 'error');
+        }
       }
     },
-    [isAdmin, showToast]
+    [isAdmin, user, messages, showToast]
   );
 
+  // Iniciar Edição da própria mensagem
+  const handleStartEdit = useCallback((msg: GroupMessage) => {
+    if (msg.uid !== user?.uid) {
+      showToast('Apenas o autor pode editar esta mensagem.', 'error');
+      return;
+    }
+    setEditingMessage(msg);
+    setInputText(msg.text);
+    setReplyingTo(null);
+    setPendingImage(null);
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 60);
+  }, [user, showToast]);
+
   const handleSelectReply = useCallback((msg: GroupMessage) => {
+    setEditingMessage(null);
     setReplyingTo(msg);
     inputRef.current?.focus();
   }, []);
@@ -1505,6 +1599,7 @@ export default function ChatPage() {
                       isAdmin={isAdmin}
                       onReply={handleSelectReply}
                       onDelete={handleDeleteMessage}
+                      onEdit={handleStartEdit}
                       onReact={handleToggleReaction}
                       onScrollToReply={scrollToMessage}
                       onOpenImage={handleOpenLightbox}
@@ -1582,6 +1677,35 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
 
+          {/* Preview de Edição de Mensagem */}
+          <AnimatePresence>
+            {editingMessage && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-amber-950/60 border-t border-amber-800/80 px-4 py-2 flex items-center justify-between text-xs text-amber-200 shrink-0 z-20"
+              >
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Pencil className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="font-bold text-amber-400">A editar mensagem:</span>
+                  <span className="text-slate-300 truncate max-w-[200px] sm:max-w-md">{editingMessage.text}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMessage(null);
+                    setInputText('');
+                  }}
+                  className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                  title="Cancelar edição"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Preview de Imagem selecionada antes de enviar (com botão X de cancelar) */}
           <AnimatePresence>
             {pendingImage && (
@@ -1632,7 +1756,13 @@ export default function ChatPage() {
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder={pendingImage ? "Adicione uma legenda à foto..." : "Escreva uma mensagem para o Grupo TapRise..."}
+                  placeholder={
+                    editingMessage
+                      ? 'Edite a sua mensagem...'
+                      : pendingImage
+                      ? 'Adicione uma legenda à foto...'
+                      : 'Escreva uma mensagem para o Grupo TapRise...'
+                  }
                   maxLength={500}
                   className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition"
                 />
@@ -1645,20 +1775,27 @@ export default function ChatPage() {
 
               <button
                 type="submit"
-                disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin)}
+                disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin && !editingMessage)}
                 className={`px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed ${
-                  cooldown > 0 && !isAdmin
+                  cooldown > 0 && !isAdmin && !editingMessage
                     ? 'bg-slate-800 text-slate-400 border border-slate-700 opacity-60'
+                    : editingMessage
+                    ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-amber-600/30'
                     : 'bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white shadow-blue-600/30'
                 }`}
-                title="Enviar mensagem"
+                title={editingMessage ? 'Salvar alterações' : 'Enviar mensagem'}
               >
                 {isSending ? (
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                ) : cooldown > 0 && !isAdmin ? (
+                ) : cooldown > 0 && !isAdmin && !editingMessage ? (
                   <>
                     <Clock className="w-4 h-4 text-amber-400 animate-spin" />
                     <span>{cooldown}s</span>
+                  </>
+                ) : editingMessage ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span className="hidden sm:inline">Salvar</span>
                   </>
                 ) : (
                   <>
