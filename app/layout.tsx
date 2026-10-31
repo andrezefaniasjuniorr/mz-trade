@@ -53,16 +53,28 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js')
-                    .then(function(reg) {
-                      console.log('[TapRise PWA] Service Worker registado:', reg.scope);
-                    })
-                    .catch(function(err) {
-                      console.warn('[TapRise PWA] Erro ao registar Service Worker:', err);
-                    });
-                });
+              if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+                var isPreview = window.location.hostname.includes('aistudio') || 
+                                window.location.hostname.includes('googleusercontent') || 
+                                window.location.hostname.includes('run.app');
+                if (isPreview) {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    for (var i = 0; i < regs.length; i++) {
+                      regs[i].unregister();
+                    }
+                  });
+                  console.log('[TapRise] Preview do Studio detetado - SW desregistrado para evitar conflito');
+                } else {
+                  window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js?v=3')
+                      .then(function(reg) {
+                        console.log('[TapRise PWA] Service Worker registado:', reg.scope);
+                      })
+                      .catch(function(err) {
+                        console.warn('[TapRise PWA] Erro ao registar Service Worker:', err);
+                      });
+                  });
+                }
               }
             `
           }}

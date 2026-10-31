@@ -204,7 +204,7 @@ export default function RegisterPage() {
                     value={nome}
                     onChange={(e) => setNome(e.target.value)}
                     placeholder="Ex: Armando Cossa"
-                    className="block w-full pl-10 pr-3 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
+                    className="block w-full pl-10 pr-3 py-3 text-xs bg-white text-slate-900 border border-slate-200 rounded-2xl placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
                   />
                 </div>
               </div>
@@ -224,7 +224,7 @@ export default function RegisterPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="seu-email@dominio.mz"
-                    className="block w-full pl-10 pr-3 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
+                    className="block w-full pl-10 pr-3 py-3 text-xs bg-white text-slate-900 border border-slate-200 rounded-2xl placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
                   />
                 </div>
               </div>
@@ -244,7 +244,7 @@ export default function RegisterPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Mínimo 6 caracteres seguros"
-                    className="block w-full pl-10 pr-10 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
+                    className="block w-full pl-10 pr-10 py-3 text-xs bg-white text-slate-900 border border-slate-200 rounded-2xl placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
                   />
                   <button
                     type="button"
@@ -277,7 +277,7 @@ export default function RegisterPage() {
                       value={idade}
                       onChange={(e) => setIdade(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
                       placeholder="Ex: 24"
-                      className="block w-full pl-10 pr-3 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
+                      className="block w-full pl-10 pr-3 py-3 text-xs bg-white text-slate-900 border border-slate-200 rounded-2xl placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition"
                     />
                   </div>
                 </div>
@@ -294,7 +294,7 @@ export default function RegisterPage() {
                     <select
                       value={provincia}
                       onChange={(e) => setProvincia(e.target.value)}
-                      className="block w-full pl-10 pr-8 py-3 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition cursor-pointer appearance-none"
+                      className="block w-full pl-10 pr-8 py-3 text-xs bg-white text-slate-900 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition cursor-pointer appearance-none"
                     >
                       {MOZAMBIQUE_PROVINCES.map((prov) => (
                         <option key={prov} value={prov}>
