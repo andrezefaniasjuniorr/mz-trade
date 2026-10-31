@@ -265,16 +265,108 @@ export async function uploadImageWithProgress(
   }
 }
 
+// ========================================================
+// OFFLINE-FIRST LOCAL STORAGE PERSISTENCE (WHATSAPP STYLE)
+// ========================================================
+
+const STORAGE_KEYS = {
+  GROUP_MESSAGES: 'taprise_offline_group_messages',
+  PRIVATE_MESSAGES_PREFIX: 'taprise_offline_private_',
+  PRIVATE_CHATS_LIST: 'taprise_offline_private_chats_list'
+};
+
+export function saveLocalGroupMessages(msgs: GroupMessage[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const toSave = msgs.slice(-80).map((m) => ({
+      ...m,
+      createdAt: m.createdAt?.seconds ? { seconds: m.createdAt.seconds } : m.createdAt
+    }));
+    localStorage.setItem(STORAGE_KEYS.GROUP_MESSAGES, JSON.stringify(toSave));
+    cachedMessages = msgs;
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to persist group messages:', err);
+  }
+}
+
+export function loadLocalGroupMessages(): GroupMessage[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.GROUP_MESSAGES);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      cachedMessages = parsed;
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to load cached group messages:', err);
+  }
+  return [];
+}
+
+export function saveLocalPrivateMessages(chatUid: string, msgs: PrivateMessage[]) {
+  if (typeof window === 'undefined' || !chatUid) return;
+  try {
+    const toSave = msgs.slice(-100).map((m) => ({
+      ...m,
+      createdAt: m.createdAt?.seconds ? { seconds: m.createdAt.seconds } : m.createdAt
+    }));
+    localStorage.setItem(`${STORAGE_KEYS.PRIVATE_MESSAGES_PREFIX}${chatUid}`, JSON.stringify(toSave));
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to persist private messages:', err);
+  }
+}
+
+export function loadLocalPrivateMessages(chatUid: string): PrivateMessage[] {
+  if (typeof window === 'undefined' || !chatUid) return [];
+  try {
+    const raw = localStorage.getItem(`${STORAGE_KEYS.PRIVATE_MESSAGES_PREFIX}${chatUid}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to load cached private messages:', err);
+  }
+  return [];
+}
+
+export function saveLocalPrivateChats(chats: PrivateChatDoc[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.PRIVATE_CHATS_LIST, JSON.stringify(chats.slice(0, 100)));
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to persist private chats list:', err);
+  }
+}
+
+export function loadLocalPrivateChats(): PrivateChatDoc[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CHATS_LIST);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (err) {
+    console.warn('[TapRise Offline] Failed to load cached private chats:', err);
+  }
+  return [];
+}
+
 // In-memory cache for sub-300ms instant open
 let cachedMessages: GroupMessage[] = [];
 let hasPrefetched = false;
 
 export function getCachedMessages(): GroupMessage[] {
+  if (cachedMessages.length === 0) {
+    cachedMessages = loadLocalGroupMessages();
+  }
   return cachedMessages;
 }
 
 export function setCachedMessages(msgs: GroupMessage[]) {
   cachedMessages = msgs;
+  saveLocalGroupMessages(msgs);
 }
 
 /**

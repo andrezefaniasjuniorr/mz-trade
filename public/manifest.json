@@ -1,12 +1,20 @@
 {
-  "name": "TapRise - Bolsa e Mercadorias",
+  "name": "TapRise - Bolsa e Mercadorias de Moçambique",
   "short_name": "TapRise",
-  "description": "Plataforma profissional de negociação e simulação financeira em Meticais (MT).",
+  "description": "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#020617",
-  "theme_color": "#2563eb",
+  "theme_color": "#020617",
   "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
     {
       "src": "/favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",

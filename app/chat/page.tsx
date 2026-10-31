@@ -52,6 +52,12 @@ import {
   PrivateMessage,
   getCachedMessages,
   setCachedMessages,
+  loadLocalGroupMessages,
+  saveLocalGroupMessages,
+  loadLocalPrivateMessages,
+  saveLocalPrivateMessages,
+  loadLocalPrivateChats,
+  saveLocalPrivateChats,
   compressChatImage,
   uploadImageWithProgress,
   playMessageSound
@@ -601,7 +607,7 @@ export default function ChatPage() {
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState<boolean>(false);
 
   // --- ESTADO DO CHAT PRIVADO ---
-  const [privateChatsList, setPrivateChatsList] = useState<PrivateChatDoc[]>([]);
+  const [privateChatsList, setPrivateChatsList] = useState<PrivateChatDoc[]>(() => loadLocalPrivateChats());
   const [adminSelectedUserId, setAdminSelectedUserId] = useState<string | null>(null);
   const [privateMessages, setPrivateMessages] = useState<PrivateMessage[]>([]);
   const [isLoadingPrivateMessages, setIsLoadingPrivateMessages] = useState<boolean>(false);
@@ -860,6 +866,7 @@ export default function ChatPage() {
           }
 
           setPrivateChatsList(list);
+          saveLocalPrivateChats(list);
           setUnreadPrivateCount(totalUnread);
 
           // Se nenhuma conversa selecionada e houver lista, seleciona a primeira
@@ -912,6 +919,14 @@ export default function ChatPage() {
       return;
     }
 
+    // Carrega instantaneamente mensagens em cache deste usuário (Offline-first estilo WhatsApp)
+    const cacheTimer = setTimeout(() => {
+      const localCached = loadLocalPrivateMessages(activePrivateTargetUid);
+      if (localCached.length > 0) {
+        setPrivateMessages(localCached);
+      }
+    }, 0);
+
     const msgsRef = collection(db, 'private_chats', activePrivateTargetUid, 'messages');
     const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(150));
 
@@ -938,6 +953,7 @@ export default function ChatPage() {
         });
 
         setPrivateMessages(list);
+        saveLocalPrivateMessages(activePrivateTargetUid, list);
         setIsLoadingPrivateMessages(false);
 
         // Se o usuário/admin estiver a ver a conversa, zera os não lidos da sua parte
@@ -961,6 +977,7 @@ export default function ChatPage() {
     );
 
     return () => {
+      clearTimeout(cacheTimer);
       unsub();
       setPrivateMessages([]);
     };

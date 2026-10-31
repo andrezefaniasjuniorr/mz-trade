@@ -198,11 +198,27 @@ export default function AdminPage() {
   const [chatNoticeText, setChatNoticeText] = useState<string>('');
   const [isSendingChatNotice, setIsSendingChatNotice] = useState<boolean>(false);
   const [pinChatNotice, setPinChatNotice] = useState<boolean>(true);
-  const [adminChatMessages, setAdminChatMessages] = useState<any[]>([]);
+  const [adminChatMessages, setAdminChatMessages] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('taprise_offline_admin_chat_msgs');
+        if (raw) return JSON.parse(raw);
+      } catch {}
+    }
+    return [];
+  });
   const [pinnedChatConfig, setPinnedChatConfig] = useState<any>(null);
 
   // State
-  const [usersList, setUsersList] = useState<UserRecord[]>([]);
+  const [usersList, setUsersList] = useState<UserRecord[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('taprise_offline_admin_users');
+        if (raw) return JSON.parse(raw);
+      } catch {}
+    }
+    return [];
+  });
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [userSearch, setUserSearch] = useState<string>('');
   const [filterZeroBalance, setFilterZeroBalance] = useState<boolean>(false);
@@ -351,6 +367,11 @@ export default function AdminPage() {
             const timeB = b.criadoEm?.seconds || (b.criadoEm ? new Date(b.criadoEm).getTime() / 1000 : 0);
             return timeB - timeA;
           });
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('taprise_offline_admin_users', JSON.stringify(merged.slice(0, 100)));
+            } catch {}
+          }
           return merged;
         });
       }
@@ -455,6 +476,11 @@ export default function AdminPage() {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setAdminChatMessages(list);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('taprise_offline_admin_chat_msgs', JSON.stringify(list.slice(0, 50)));
+        } catch {}
+      }
     }, (e) => console.warn('Erro ao carregar chat admin:', e));
 
     // 9. Ouvir Mensagem Fixada
