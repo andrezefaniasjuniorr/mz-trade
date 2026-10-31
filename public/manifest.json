@@ -1,7 +1,7 @@
 {
   "name": "TapRise - Bolsa e Mercadorias de Moçambique",
   "short_name": "TapRise",
-  "description": "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.",
+  "description": "TapRise - Plataforma profissional com conta de investidor, chat ao vivo com a Mesa e outros investidores. Janela operacional de segunda a sexta, das 21h às 21h30. 1 clique, menos de 1 minuto.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -1736,14 +1736,14 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Simulation Info */}
+          {/* Market Execution Info */}
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-900 space-y-1">
             <p className="font-bold flex items-center gap-1">
               <Info className="w-3.5 h-3.5 text-blue-600" />
-              Ambiente Educacional
+              Mesa de Operações
             </p>
             <p className="text-blue-700 leading-tight">
-              Os preços são simulados em tempo real com base no mercado moçambicano. Pratique sem risco financeiro.
+              Cotações e ordens em tempo real com base no mercado de matérias-primas e commodities de Moçambique.
             </p>
           </div>
         </aside>
@@ -2281,7 +2281,7 @@ export default function Home() {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div>
                   <h1 className="text-xl font-black text-slate-900">Mercado de Matérias-Primas</h1>
-                  <p className="text-xs text-slate-500">Cotações oficiais simuladas e instrumentos negociáveis em Moçambique</p>
+                  <p className="text-xs text-slate-500">Cotações oficiais e instrumentos negociáveis em Moçambique</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">

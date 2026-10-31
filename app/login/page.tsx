@@ -177,12 +177,12 @@ export default function LoginPage() {
               </div>
               <div className="relative flex justify-center text-xs">
                 <span className="px-3 bg-white text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
-                  Ou experimente em modo de demonstração
+                  Ou aceda como investidor visitante
                 </span>
               </div>
             </div>
 
-            {/* Quick Demo Access */}
+            {/* Quick Guest Access */}
             <div className="mt-4">
               <button
                 type="button"

@@ -1071,7 +1071,7 @@ export default function AdminPage() {
             { id: 'visao-geral', label: 'Aba 1 - Visão Geral', icon: PieChart },
             { id: 'usuarios', label: 'Gestão de Usuários', icon: Users, badge: zeroBalanceCount > 0 ? `${zeroBalanceCount} novos` : undefined },
             { id: 'levantamentos', label: 'Levantamentos (M-Pesa/e-Mola)', icon: Smartphone, badge: pendingWithdrawalsCount > 0 ? `${pendingWithdrawalsCount} pendente(s)` : undefined },
-            { id: 'jogo-21h', label: 'Aba 3 - Jogo 21h', icon: Zap, badge: dailyConfig.actionType === 'buy' ? 'COMPRAR' : 'VENDER' },
+            { id: 'jogo-21h', label: 'Aba 3 - Janela 21h', icon: Zap, badge: dailyConfig.actionType === 'buy' ? 'COMPRAR' : 'VENDER' },
             { id: 'mercado', label: 'Aba 4 - Mercado & Horários', icon: BarChart2 },
             { id: 'comunicados', label: 'Aba 5 - Comunicados Globais', icon: Bell },
             { id: 'dica-instrutor', label: 'Dica do Instrutor', icon: BookOpen },
@@ -1175,7 +1175,7 @@ export default function AdminPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     {marketConfig.scheduleText || 'Segunda a Sexta às 21:00'}
                   </span>
-                  <span className="text-xs text-slate-400 block mt-1">Simulação autônoma independente</span>
+                  <span className="text-xs text-slate-400 block mt-1">Cotação autônoma de mercado</span>
                 </div>
               </div>
             </div>
@@ -1799,7 +1799,7 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-base font-black text-white">Jogo 21h • Janela Diária de Recompensa (admin_config/daily)</h2>
+                      <h2 className="text-base font-black text-white">Janela Operacional 21h • Janela Diária de Execução (admin_config/daily)</h2>
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                         1x Por Dia
                       </span>
@@ -2135,7 +2135,7 @@ export default function AdminPage() {
                 <div>
                   <h3 className="text-sm font-bold text-white">Controlo Individual de Commodities</h3>
                   <p className="text-xs text-slate-400">
-                    O preço continuará em simulação autônoma realista. Pausar desabilita ordens para a matéria-prima selecionada.
+                    O preço continuará em cotação autônoma contínua. Pausar desabilita ordens para a matéria-prima selecionada.
                   </p>
                 </div>
               </div>

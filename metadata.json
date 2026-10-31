@@ -1,6 +1,6 @@
 {
   "name": "MZ Trade - Bolsa Virtual de Mercadorias de Moçambique",
-  "description": "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities moçambicanas.",
+  "description": "TapRise - Plataforma profissional com conta de investidor, chat ao vivo com a Mesa e outros investidores. Janela operacional de segunda a sexta, das 21h às 21h30. 1 clique, menos de 1 minuto.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
