@@ -16,8 +16,7 @@ import {
   CheckCircle,
   ShieldCheck,
   UserPlus,
-  LogOut,
-  Wallet
+  LogOut
 } from 'lucide-react';
 import { useAuth, MOZAMBIQUE_PROVINCES } from '@/context/AuthContext';
 
@@ -112,9 +111,6 @@ export default function RegisterPage() {
           <h2 className="mt-4 text-xl sm:text-2xl font-black text-slate-900">
             Registe a sua Conta de Investidor
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Crie a sua conta de operações. O saldo inicial é atribuído pela Administração da Mesa de Operações.
-          </p>
         </div>
 
         {/* Existing Logged-in Alert Card if non-anonymous user visits /register */}
@@ -157,21 +153,6 @@ export default function RegisterPage() {
             <p className="text-xs text-emerald-700 font-medium">
               Conta registada (0,00 MT iniciais). O Administrador foi notificado para creditar o seu saldo. A redirecionar para a plataforma...
             </p>
-          </div>
-        )}
-
-        {/* Info Card: Initial 0 MT Balance & Admin Control */}
-        {(!isAlreadyRegistered || isSuccess) && (
-          <div className="mb-4 bg-gradient-to-r from-slate-900 to-blue-950 rounded-2xl p-4 text-white shadow-md flex items-center space-x-3 border border-slate-800">
-            <div className="p-2.5 bg-blue-600/30 rounded-xl backdrop-blur-xs shrink-0 text-blue-300">
-              <Wallet className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">Abertura de Conta Supervisionada</p>
-              <p className="text-xs font-semibold text-slate-200">
-                A sua conta inicia com 0,00 MT. O saldo operacional é creditado e gerido pelo Administrador da plataforma.
-              </p>
-            </div>
           </div>
         )}
 

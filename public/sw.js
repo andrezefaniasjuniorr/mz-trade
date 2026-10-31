@@ -1,4 +1,4 @@
-const CACHE_NAME = 'taprise-v3-fix';
+const CACHE_NAME = 'taprise-v4-no-fouc';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => { 
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.map(k => k !== CACHE_NAME && caches.delete(k)))).then(() => self.clients.claim())); 

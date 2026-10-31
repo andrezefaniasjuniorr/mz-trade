@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* Evita o flash branco / FOUC */
+html { 
+  visibility: visible; 
+  opacity: 1; 
+}
+
+body { 
+  background: #f8fafc; 
+}
+
 /* Fix global para visibilidade de formulários e inputs (fundo branco, texto nítido #0f172a) */
 input, select, textarea {
   color: #0f172a !important;

@@ -1,36 +1,36 @@
-import type { Metadata, Viewport } from 'next';
-import './globals.css';
-import { AuthProvider } from '@/context/AuthContext';
-import OfflineBanner from '@/components/OfflineBanner';
+import "./globals.css";
+import type { Metadata, Viewport } from "next";
+import { AuthProvider } from "@/context/AuthContext";
+import OfflineBanner from "@/components/OfflineBanner";
 
 export const metadata: Metadata = {
-  title: 'TapRise - Bolsa e Mercadorias de Moçambique',
-  description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.',
-  manifest: '/manifest.json',
+  title: "TapRise",
+  description: "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.",
+  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'TapRise'
+    statusBarStyle: "black-translucent",
+    title: "TapRise"
   },
   icons: {
-    icon: '/icon.svg',
-    apple: '/icon.svg'
+    icon: "/icon.svg",
+    apple: "/icon.svg"
   },
   openGraph: {
-    title: 'TapRise - Bolsa e Mercadorias de Moçambique',
-    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.',
-    type: 'website'
+    title: "TapRise",
+    description: "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.",
+    type: "website"
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'TapRise - Bolsa e Mercadorias de Moçambique',
-    description: 'Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities.'
+    card: "summary_large_image",
+    title: "TapRise",
+    description: "Plataforma profissional de negociação e simulação financeira em Meticais (MT) para matérias-primas e commodities."
   }
 };
 
 export const viewport: Viewport = {
-  themeColor: '#020617',
-  width: 'device-width',
+  themeColor: "#020617",
+  width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false
@@ -38,18 +38,19 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt">
+    <html lang="pt-MZ">
       <head>
+        <link rel="preload" href="/_next/static/css/app/layout.css" as="style" />
         <link rel="apple-touch-icon" href="/icon.svg" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body suppressHydrationWarning className="bg-slate-950 text-slate-100 antialiased selection:bg-blue-600 selection:text-white">
+      <body suppressHydrationWarning className="bg-slate-50 text-slate-900 antialiased min-h-screen">
         <AuthProvider>
           <OfflineBanner />
           {children}
         </AuthProvider>
 
-        {/* Registro do Service Worker no cliente (Offline-First estilo WhatsApp) */}
+        {/* Registro do Service Worker v=4 com desativação em preview do Studio */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -63,15 +64,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       regs[i].unregister();
                     }
                   });
-                  console.log('[TapRise] Preview do Studio detetado - SW desregistrado para evitar conflito');
                 } else {
                   window.addEventListener('load', function() {
-                    navigator.serviceWorker.register('/sw.js?v=3')
+                    navigator.serviceWorker.register('/sw.js?v=4')
                       .then(function(reg) {
-                        console.log('[TapRise PWA] Service Worker registado:', reg.scope);
+                        console.log('[TapRise PWA v4] Service Worker registado:', reg.scope);
                       })
                       .catch(function(err) {
-                        console.warn('[TapRise PWA] Erro ao registar Service Worker:', err);
+                        console.warn('[TapRise PWA v4] Erro ao registar Service Worker:', err);
                       });
                   });
                 }
