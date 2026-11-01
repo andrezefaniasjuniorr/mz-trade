@@ -30,6 +30,16 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [idade, setIdade] = useState<number | ''>('');
   const [provincia, setProvincia] = useState<string>('Maputo Cidade');
+  
+  // Capturar ?ref= da URL (para convites de 5%) de forma segura
+  const [refCode] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get('ref');
+      return ref ? ref.trim().toUpperCase() : '';
+    }
+    return '';
+  });
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -78,7 +88,7 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    const result = await register(email, password, nome, idadeNum, provincia);
+    const result = await register(email, password, nome, idadeNum, provincia, refCode || undefined);
     setIsSubmitting(false);
 
     if (!result.success) {
@@ -165,6 +175,21 @@ export default function RegisterPage() {
               <div className="mb-5 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start space-x-3 text-rose-800 text-xs font-semibold">
                 <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">{errorMessage}</div>
+              </div>
+            )}
+
+            {/* Active Referral Invite Badge */}
+            {refCode && (
+              <div className="mb-5 p-3.5 bg-blue-50/90 border border-blue-200 rounded-2xl flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+                  5%
+                </div>
+                <div className="text-xs">
+                  <p className="font-bold text-blue-950">Convite Especial Ativo</p>
+                  <p className="text-blue-700 font-mono text-[11px]">
+                    Código: <span className="font-bold">{refCode}</span>
+                  </p>
+                </div>
               </div>
             )}
 

@@ -94,6 +94,12 @@ interface UserRecord {
   ultimoCreditoEm?: any;
   patrimonioTotal?: number;
   criadoEm?: any;
+  inviteCode?: string;
+  invitedBy?: string;
+  invitedByCode?: string;
+  commissionPaid?: boolean;
+  totalComissoes?: number;
+  indicadosCount?: number;
 }
 
 interface CommodityConfig {
@@ -342,7 +348,13 @@ export default function AdminPage() {
           patrimonioTotal: saldoTot,
           status: d.status || (saldoDisp > 0 ? 'ativo' : 'aguardando'),
           ultimoCreditoEm: d.ultimoCreditoEm,
-          criadoEm: d.criadoEm || d.createdAt
+          criadoEm: d.criadoEm || d.createdAt,
+          inviteCode: d.inviteCode,
+          invitedBy: d.invitedBy,
+          invitedByCode: d.invitedByCode,
+          commissionPaid: !!d.commissionPaid,
+          totalComissoes: d.totalComissoes || 0,
+          indicadosCount: d.indicadosCount || 0
         });
       });
       users.sort((a, b) => {
@@ -387,7 +399,13 @@ export default function AdminPage() {
               patrimonioTotal: saldoTot,
               status: d.status || existing?.status || (saldoDisp > 0 ? 'ativo' : 'aguardando'),
               ultimoCreditoEm: d.ultimoCreditoEm || existing?.ultimoCreditoEm,
-              criadoEm: d.criadoEm || existing?.criadoEm
+              criadoEm: d.criadoEm || existing?.criadoEm,
+              inviteCode: d.inviteCode || existing?.inviteCode,
+              invitedBy: d.invitedBy || existing?.invitedBy,
+              invitedByCode: d.invitedByCode || existing?.invitedByCode,
+              commissionPaid: d.commissionPaid !== undefined ? !!d.commissionPaid : existing?.commissionPaid,
+              totalComissoes: d.totalComissoes || existing?.totalComissoes || 0,
+              indicadosCount: d.indicadosCount || existing?.indicadosCount || 0
             });
           });
           const merged = Array.from(map.values());
@@ -718,6 +736,79 @@ export default function AdminPage() {
         description: `Crédito de saldo (+${amountNum.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT) pelo Administrador`
       });
 
+      // 4. REQUISITO 3: Pagar 5% de comissão ao indicador se for o 1º crédito e tiver invitedBy
+      if (selectedUserForCredit.invitedBy && !selectedUserForCredit.commissionPaid) {
+        const referrerUid = selectedUserForCredit.invitedBy;
+        const commissionAmount = Number((amountNum * 0.05).toFixed(2));
+
+        if (commissionAmount > 0 && referrerUid !== targetUserId) {
+          try {
+            // A. Creditar saldo do indicador em users/{invitedBy}
+            const referrerRef = doc(db, 'users', referrerUid);
+            await updateDoc(referrerRef, {
+              balance: increment(commissionAmount),
+              saldoVirtual: increment(commissionAmount),
+              patrimonioTotal: increment(commissionAmount),
+              totalComissoes: increment(commissionAmount),
+              atualizadoEm: serverTimestamp()
+            });
+
+            // B. Também atualizar usuarios/{invitedBy} para compatibilidade
+            try {
+              const refUsuarioDoc = doc(db, 'usuarios', referrerUid);
+              await updateDoc(refUsuarioDoc, {
+                saldoDisponivel: increment(commissionAmount),
+                saldoTotal: increment(commissionAmount)
+              });
+            } catch {}
+
+            // C. Registar na coleção 'commissions'
+            await addDoc(collection(db, 'commissions'), {
+              referrerUid: referrerUid,
+              referredUid: targetUserId,
+              referredName: selectedUserForCredit.nome || 'Investidor Convidado',
+              referredEmail: selectedUserForCredit.email || '',
+              creditAmount: amountNum,
+              rate: 0.05,
+              commissionAmount: commissionAmount,
+              status: 'paid',
+              paidAt: serverTimestamp(),
+              description: `Bônus de convite de 5% sobre 1º crédito de ${amountNum.toFixed(2)} MT`
+            });
+
+            // D. Registar no histórico do indicador como "Bônus de convite"
+            await addDoc(collection(db, 'transactions'), {
+              userId: referrerUid,
+              uid: referrerUid,
+              userName: 'Indicador TapRise',
+              userEmail: '',
+              type: 'bonus_convite',
+              amount: commissionAmount,
+              referredUserId: targetUserId,
+              referredUserName: selectedUserForCredit.nome || 'Investidor Convidado',
+              timestamp: serverTimestamp(),
+              description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${selectedUserForCredit.nome || 'convidado'}`
+            });
+
+            // E. Marcar commissionPaid = true para nunca pagar de novo a este usuário
+            await updateDoc(userRef, {
+              commissionPaid: true,
+              commissionPaidAt: serverTimestamp(),
+              commissionAmount: commissionAmount
+            });
+            try {
+              await updateDoc(usuarioRef, {
+                commissionPaid: true
+              });
+            } catch {}
+
+            showToast(`Bônus de convite de +${commissionAmount.toFixed(2)} MT (5%) pago com sucesso ao indicador!`, 'info');
+          } catch (commErr) {
+            console.warn('Erro ao processar comissão de convite:', commErr);
+          }
+        }
+      }
+
       showToast(`Sucesso! +${amountNum.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT creditados com sucesso a ${selectedUserForCredit.nome}!`, 'success');
       setSelectedUserForCredit(null);
       setCreditAmount('5000');
@@ -756,6 +847,56 @@ export default function AdminPage() {
         timestamp: serverTimestamp(),
         description: `Bónus manual rápido de +${amount} MT atribuído pelo Administrador`
       });
+
+      // Pagar 5% de comissão ao indicador se for 1º crédito
+      if (targetUser.invitedBy && !targetUser.commissionPaid) {
+        const referrerUid = targetUser.invitedBy;
+        const commissionAmount = Number((amount * 0.05).toFixed(2));
+        if (commissionAmount > 0 && referrerUid !== targetUserId) {
+          try {
+            await updateDoc(doc(db, 'users', referrerUid), {
+              balance: increment(commissionAmount),
+              saldoVirtual: increment(commissionAmount),
+              patrimonioTotal: increment(commissionAmount),
+              totalComissoes: increment(commissionAmount),
+              atualizadoEm: serverTimestamp()
+            });
+
+            await addDoc(collection(db, 'commissions'), {
+              referrerUid: referrerUid,
+              referredUid: targetUserId,
+              referredName: targetUser.nome || 'Investidor Convidado',
+              creditAmount: amount,
+              rate: 0.05,
+              commissionAmount: commissionAmount,
+              status: 'paid',
+              paidAt: serverTimestamp(),
+              description: `Bônus de convite de 5% sobre 1º crédito rápido de ${amount.toFixed(2)} MT`
+            });
+
+            await addDoc(collection(db, 'transactions'), {
+              userId: referrerUid,
+              uid: referrerUid,
+              userName: 'Indicador TapRise',
+              userEmail: '',
+              type: 'bonus_convite',
+              amount: commissionAmount,
+              referredUserId: targetUserId,
+              referredUserName: targetUser.nome || 'Investidor Convidado',
+              timestamp: serverTimestamp(),
+              description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${targetUser.nome || 'convidado'}`
+            });
+
+            await updateDoc(doc(db, 'users', targetUserId), {
+              commissionPaid: true,
+              commissionPaidAt: serverTimestamp(),
+              commissionAmount: commissionAmount
+            });
+          } catch (commErr) {
+            console.warn('Erro ao pagar comissão no crédito rápido:', commErr);
+          }
+        }
+      }
 
       showToast(`+${amount} MT creditados imediatamente a ${targetUser.nome || targetUser.email}!`, 'success');
     } catch (err: any) {
@@ -1633,7 +1774,18 @@ export default function AdminPage() {
 
                             {/* Email */}
                             <td className="py-3.5 px-4 text-slate-300 font-mono text-xs">
-                              {u.email || '—'}
+                              <div>{u.email || '—'}</div>
+                              {u.invitedBy && (
+                                <div className="mt-1">
+                                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-bold ${
+                                    u.commissionPaid
+                                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                                      : 'bg-blue-950/80 text-blue-300 border border-blue-800'
+                                  }`}>
+                                    {u.commissionPaid ? '✓ 5% Comissão Paga' : '🎁 Convidado (Paga 5%)'}
+                                  </span>
+                                </div>
+                              )}
                             </td>
 
                             {/* Saldo Disponível */}
@@ -1791,6 +1943,21 @@ export default function AdminPage() {
                   ).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
                 </span>
               </div>
+
+              {/* Aviso de Bónus de Convite de 5% */}
+              {selectedUserForCredit.invitedBy && !selectedUserForCredit.commissionPaid && (
+                <div className="p-3 bg-blue-950/60 border border-blue-500/40 rounded-2xl space-y-1 text-xs">
+                  <div className="flex items-center justify-between text-blue-300 font-bold">
+                    <span>🎁 Bónus de Convite (5%)</span>
+                    <span className="font-mono text-amber-300 font-black">
+                      +{((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Este utilizador foi indicado (código: <span className="font-mono text-white font-bold">{selectedUserForCredit.invitedByCode || selectedUserForCredit.invitedBy.slice(0, 8)}</span>). 5% deste 1º crédito será pago automaticamente ao indicador!
+                  </p>
+                </div>
+              )}
 
               {/* Botões: Cancelar e Confirmar Crédito */}
               <div className="flex gap-2.5 pt-2">

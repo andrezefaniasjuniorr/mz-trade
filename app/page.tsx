@@ -3156,6 +3156,80 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* SEÇÃO: CONVIDE E GANHE 5% */}
+              <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-800 rounded-3xl p-6 text-white shadow-xl shadow-blue-500/10 space-y-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black tracking-wider uppercase backdrop-blur-xs">
+                      <span>Bónus de Indicação</span>
+                    </div>
+                    <h3 className="text-lg font-black text-white mt-1.5">
+                      Convide e Ganhe 5%
+                    </h3>
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/20 flex items-center justify-center font-black text-sm text-amber-300">
+                    5%
+                  </div>
+                </div>
+
+                <p className="text-xs text-blue-100 leading-relaxed">
+                  Partilhe o seu link exclusivo. Quando um amigo se registar através dele e tiver saldo creditado pela Administração pela primeira vez, você recebe <strong>5% do valor creditado</strong> diretamente no seu saldo disponível!
+                </p>
+
+                {/* Link Box & Copy Button */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">
+                    O Seu Link de Convite
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={userProfile?.inviteCode ? `https://taprise.pages.dev/register?ref=${userProfile.inviteCode}` : 'A gerar código de convite...'}
+                      className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={!userProfile?.inviteCode}
+                      onClick={() => {
+                        if (userProfile?.inviteCode) {
+                          handleCopyText(`https://taprise.pages.dev/register?ref=${userProfile.inviteCode}`, 'Link de Convite');
+                        }
+                      }}
+                      className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                    >
+                      {copiedField === 'Link de Convite' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metrics */}
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/15">
+                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
+                    <p className="text-[10px] uppercase font-bold text-blue-200">Convidados Registados</p>
+                    <p className="text-lg font-black text-white mt-0.5">
+                      {userProfile?.indicadosCount || 0}
+                    </p>
+                  </div>
+                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
+                    <p className="text-[10px] uppercase font-bold text-blue-200">Comissões Recebidas</p>
+                    <p className="text-lg font-black text-amber-300 mt-0.5">
+                      {formatMT(userProfile?.totalComissoes || 0)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Account Management & Creation */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                 <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2">

@@ -169,33 +169,6 @@ export default function LoginPage() {
             </div>
           </form>
 
-          {/* Divider */}
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200" />
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="px-3 bg-white text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
-                  Ou aceda como investidor visitante
-                </span>
-              </div>
-            </div>
-
-            {/* Quick Guest Access */}
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={handleGuestLogin}
-                disabled={isSubmitting}
-                className="w-full flex items-center justify-center space-x-2 py-3 px-4 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
-              >
-                <UserCheck className="w-4 h-4 text-blue-600" />
-                <span>Entrar como Visitante Convidado</span>
-              </button>
-            </div>
-          </div>
-
           {/* Registration Promo */}
           <div className="mt-6 pt-5 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-600">

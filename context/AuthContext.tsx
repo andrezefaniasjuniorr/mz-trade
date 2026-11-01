@@ -14,12 +14,31 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  limit,
+  increment,
   onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db } from '@/src/firebase';
 
 export const ADMIN_EMAIL = 'garotoestranho454@gmail.com';
+
+/**
+ * Gera um código de convite único de 8 caracteres alfanuméricos
+ */
+export function generateInviteCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
 
 export interface UserProfile {
   uid: string;
@@ -31,6 +50,12 @@ export interface UserProfile {
   balance?: number;
   patrimonioTotal: number;
   lastClaimDate?: string;
+  inviteCode?: string;
+  invitedBy?: string; // UID de quem convidou
+  invitedByCode?: string; // Código de 8 caracteres
+  commissionPaid?: boolean; // Se a comissão de 5% sobre o 1º crédito já foi paga
+  totalComissoes?: number;
+  indicadosCount?: number;
   criadoEm?: unknown;
   atualizadoEm?: unknown;
 }
@@ -61,7 +86,8 @@ interface AuthContextType {
     pass: string,
     nome: string,
     idade: number,
-    provincia: string
+    provincia: string,
+    refCode?: string
   ) => Promise<{ success: boolean; error?: string }>;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   loginGuest: () => Promise<{ success: boolean; error?: string }>;
@@ -135,6 +161,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? data.balance
           : (typeof data.saldoVirtual === 'number' ? data.saldoVirtual : 0.0);
 
+        let inviteCode = data.inviteCode;
+        if (!inviteCode) {
+          inviteCode = generateInviteCode();
+          setDoc(userRef, { inviteCode }, { merge: true }).catch(() => {});
+        }
+
         const profile: UserProfile = {
           uid,
           nome: data.nome || fallbackName || defaultFallback.nome,
@@ -145,12 +177,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           balance: currentBalance,
           patrimonioTotal: typeof data.patrimonioTotal === 'number' ? data.patrimonioTotal : currentBalance,
           lastClaimDate: data.lastClaimDate || '',
+          inviteCode,
+          invitedBy: data.invitedBy || '',
+          invitedByCode: data.invitedByCode || '',
+          commissionPaid: typeof data.commissionPaid === 'boolean' ? data.commissionPaid : false,
+          totalComissoes: typeof data.totalComissoes === 'number' ? data.totalComissoes : 0,
+          indicadosCount: typeof data.indicadosCount === 'number' ? data.indicadosCount : 0,
           criadoEm: data.criadoEm,
           atualizadoEm: data.atualizadoEm
         };
         saveCachedProfile(profile);
         return profile;
       } else if (snapshot && !snapshot.exists()) {
+        const myInviteCode = generateInviteCode();
         // Document doesn't exist yet, seed it with 0.00 MT initial balance
         const newProfile: UserProfile = {
           uid,
@@ -160,7 +199,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           provincia: 'Maputo Cidade',
           saldoVirtual: 0.0,
           balance: 0.0,
-          patrimonioTotal: 0.0
+          patrimonioTotal: 0.0,
+          inviteCode: myInviteCode,
+          commissionPaid: false,
+          totalComissoes: 0,
+          indicadosCount: 0
         };
         saveCachedProfile(newProfile);
         setDoc(userRef, {
@@ -264,7 +307,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pass: string,
     nome: string,
     idade: number,
-    provincia: string
+    provincia: string,
+    refCode?: string
   ): Promise<{ success: boolean; error?: string }> => {
     // Validação de idade mínima 18 anos
     if (idade < 18) {
@@ -309,7 +353,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ignora falha cosmética de displayName
       }
 
-      // 3. Estruturar perfil inicial COM 0.00 MT DE SALDO (controle total do admin)
+      // 3. Estruturar perfil inicial com inviteCode único de 8 caracteres
+      const myInviteCode = generateInviteCode();
+      let invitedBy = '';
+      let invitedByCode = '';
+
+      if (refCode && typeof refCode === 'string') {
+        const cleanRef = refCode.trim().toUpperCase();
+        try {
+          const q = query(collection(db, 'users'), where('inviteCode', '==', cleanRef), limit(1));
+          const refSnap = await getDocs(q);
+          if (!refSnap.empty) {
+            const referrerDoc = refSnap.docs[0];
+            const referrerData = referrerDoc.data();
+            // Não permitir auto-convite
+            if (referrerDoc.id !== newUser.uid && referrerData.email?.toLowerCase() !== email.trim().toLowerCase()) {
+              invitedBy = referrerDoc.id;
+              invitedByCode = cleanRef;
+              // Incrementar contagem de indicados no indicador
+              updateDoc(doc(db, 'users', referrerDoc.id), {
+                indicadosCount: increment(1)
+              }).catch(() => {});
+            }
+          }
+        } catch (refErr) {
+          console.warn('Erro ao processar referência de convite:', refErr);
+        }
+      }
+
       const initialProfile: UserProfile = {
         uid: newUser.uid,
         nome: nome.trim(),
@@ -318,7 +389,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provincia: provincia || 'Maputo Cidade',
         saldoVirtual: 0.0,
         balance: 0.0,
-        patrimonioTotal: 0.0
+        patrimonioTotal: 0.0,
+        inviteCode: myInviteCode,
+        invitedBy: invitedBy || undefined,
+        invitedByCode: invitedByCode || undefined,
+        commissionPaid: false,
+        totalComissoes: 0,
+        indicadosCount: 0
       };
 
       // Guardar na cache local para resposta ultra-rápida
@@ -328,11 +405,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // 4. Gravar na base de dados
       const userRef = doc(db, 'users', newUser.uid);
-      setDoc(userRef, {
+      await setDoc(userRef, {
         ...initialProfile,
         criadoEm: serverTimestamp(),
         atualizadoEm: serverTimestamp()
-      }).catch((e) => console.warn('Registo na nuvem em fila:', e));
+      });
 
       setLoading(false);
       return { success: true };
