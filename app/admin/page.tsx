@@ -44,7 +44,7 @@ import {
   CreditCard
 } from 'lucide-react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
-import { getMaputoTodayDate, getMaputoTimeDetails, MaputoTimeDetails } from '@/lib/maputoTime';
+import { getMaputoTodayDate, getMaputoTimeDetails, evaluate21hOrder, MaputoTimeDetails } from '@/lib/maputoTime';
 import { db } from '@/src/firebase';
 import {
   collection,
@@ -239,6 +239,35 @@ export default function AdminPage() {
   const [isSavingDaily, setIsSavingDaily] = useState<boolean>(false);
   const [dailyClaimsToday, setDailyClaimsToday] = useState<TransactionRecord[]>([]);
   const [maputoTime, setMaputoTime] = useState<MaputoTimeDetails>(getMaputoTimeDetails());
+  const [adminTestResult, setAdminTestResult] = useState<{
+    action: 'buy' | 'sell';
+    won: boolean;
+    message: string;
+  } | null>(null);
+
+  const handleRunAdminTest = (testAction: 'buy' | 'sell') => {
+    const res = evaluate21hOrder({
+      currentBalance: 1000,
+      userAction: testAction,
+      adminAction: dailyConfig.actionType,
+      forceOpen: dailyConfig.forceOpen,
+      alreadyClaimedToday: false
+    });
+
+    if (res.won) {
+      setAdminTestResult({
+        action: testAction,
+        won: true,
+        message: `✅ TESTE APROVADO: Ao clicar em ${testAction === 'buy' ? 'COMPRAR' : 'VENDER'}, o investidor GANHA +4,73% (+${res.gain.toFixed(2)} MT). Saldo de 1.000 MT vai para ${res.newBalance.toFixed(2)} MT.`
+      });
+    } else {
+      setAdminTestResult({
+        action: testAction,
+        won: false,
+        message: `❌ TESTE STOP LOSS: Ao clicar em ${testAction === 'buy' ? 'COMPRAR' : 'VENDER'}, o investidor PERDE 100 MT. Motivo: ${res.reasonText}`
+      });
+    }
+  };
 
   // Modal "Creditar / Gerir Saldo"
   const [selectedUserForCredit, setSelectedUserForCredit] = useState<UserRecord | null>(null);
@@ -778,10 +807,10 @@ export default function AdminPage() {
         console.warn('Erro ao emitir aviso automático no chat:', chatErr);
       }
 
-      showToast(`Jogo 21h gravado! Ação oficial: ${targetAction === 'buy' ? 'COMPRAR' : 'VENDER'}${targetForce ? ' (Janela Forçada Aberta)' : ''}`, 'success');
+      showToast(`Diretriz 21h gravada! Ação oficial: ${targetAction === 'buy' ? 'COMPRAR (Alta)' : 'VENDER (Baixa)'}${targetForce ? ' (Janela Forçada Aberta)' : ''}`, 'success');
     } catch (err: any) {
-      console.error('Erro ao salvar config do Jogo 21h:', err);
-      showToast('Falha ao salvar configuração do Jogo 21h.', 'error');
+      console.error('Erro ao salvar diretriz da Janela 21h:', err);
+      showToast('Falha ao salvar diretriz da Janela 21h.', 'error');
     } finally {
       setIsSavingDaily(false);
     }
@@ -1071,7 +1100,7 @@ export default function AdminPage() {
             { id: 'visao-geral', label: 'Aba 1 - Visão Geral', icon: PieChart },
             { id: 'usuarios', label: 'Gestão de Usuários', icon: Users, badge: zeroBalanceCount > 0 ? `${zeroBalanceCount} novos` : undefined },
             { id: 'levantamentos', label: 'Levantamentos (M-Pesa/e-Mola)', icon: Smartphone, badge: pendingWithdrawalsCount > 0 ? `${pendingWithdrawalsCount} pendente(s)` : undefined },
-            { id: 'jogo-21h', label: 'Aba 3 - Janela 21h', icon: Zap, badge: dailyConfig.actionType === 'buy' ? 'COMPRAR' : 'VENDER' },
+            { id: 'jogo-21h', label: '⚡ Janela 21h (Alta/Baixa)', icon: Zap, badge: dailyConfig.actionType === 'buy' ? 'ALTA (COMPRA)' : 'BAIXA (VENDA)' },
             { id: 'mercado', label: 'Aba 4 - Mercado & Horários', icon: BarChart2 },
             { id: 'comunicados', label: 'Aba 5 - Comunicados Globais', icon: Bell },
             { id: 'dica-instrutor', label: 'Dica do Instrutor', icon: BookOpen },
@@ -1178,6 +1207,161 @@ export default function AdminPage() {
                   <span className="text-xs text-slate-400 block mt-1">Cotação autônoma de mercado</span>
                 </div>
               </div>
+            </div>
+
+            {/* ======================================================== */}
+            {/* CONTROLE CENTRAL DA JANELA 21H • MANIPULAÇÃO ALTA / BAIXA */}
+            {/* ======================================================== */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/70 border border-slate-700/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                      <Zap className="w-5 h-5 text-amber-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-white flex items-center gap-2">
+                        <span>Controle Central • Janela 21h</span>
+                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                          dailyConfig.actionType === 'buy'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        }`}>
+                          Diretriz Atual: {dailyConfig.actionType === 'buy' ? 'ALTA (COMPRA)' : 'BAIXA (VENDA)'}
+                        </span>
+                      </h2>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Altere a diretriz oficial para que os investidores saibam se devem COMPRAR ou VENDER às 21h.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 bg-slate-950/80 px-4 py-2 rounded-2xl border border-slate-800 shrink-0">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <span className="text-[10px] uppercase font-mono text-slate-400 block">Horário Maputo (CAT)</span>
+                    <span className="text-sm font-black font-mono text-white">{maputoTime.timeFormatted}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botões Grandes de Manipulação Alta e Baixa */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+                {/* Definir ALTA */}
+                <button
+                  type="button"
+                  onClick={() => handleSaveDailyConfig('buy')}
+                  disabled={isSavingDaily}
+                  className={`p-5 rounded-2xl border-2 transition-all cursor-pointer text-left flex items-center justify-between ${
+                    dailyConfig.actionType === 'buy'
+                      ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-xl shadow-emerald-500/20 ring-2 ring-emerald-500/50'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 block">Diretriz 1</span>
+                    <span className="text-xl font-black text-white mt-1 block">DEFINIR ALTA (COMPRA)</span>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Investidores que clicarem em <strong>COMPRAR</strong> ganham +4,73%. Quem vender perde 100 MT.
+                    </p>
+                  </div>
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ml-3 ${
+                    dailyConfig.actionType === 'buy' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/40' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                </button>
+
+                {/* Definir BAIXA */}
+                <button
+                  type="button"
+                  onClick={() => handleSaveDailyConfig('sell')}
+                  disabled={isSavingDaily}
+                  className={`p-5 rounded-2xl border-2 transition-all cursor-pointer text-left flex items-center justify-between ${
+                    dailyConfig.actionType === 'sell'
+                      ? 'bg-rose-950/80 border-rose-500 text-white shadow-xl shadow-rose-500/20 ring-2 ring-rose-500/50'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-rose-400 block">Diretriz 2</span>
+                    <span className="text-xl font-black text-white mt-1 block">DEFINIR BAIXA (VENDA)</span>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Investidores que clicarem em <strong>VENDER</strong> ganham +4,73%. Quem comprar perde 100 MT.
+                    </p>
+                  </div>
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ml-3 ${
+                    dailyConfig.actionType === 'sell' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/40' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    <TrendingDown className="w-6 h-6" />
+                  </div>
+                </button>
+              </div>
+
+              {/* Barra de Testes & Forçar Janela */}
+              <div className="mt-5 pt-4 border-t border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                
+                {/* Forçar Janela Aberta */}
+                <div className="flex items-center justify-between gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800 flex-1">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Forçar Janela Aberta (Modo de Teste)</span>
+                    <span className="text-[11px] text-slate-400 block">
+                      Permite testar e operar a qualquer hora do dia fora do horário das 21:00 às 21:30.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveDailyConfig(dailyConfig.actionType, !dailyConfig.forceOpen)}
+                    disabled={isSavingDaily}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shrink-0 ${
+                      dailyConfig.forceOpen
+                        ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 ring-2 ring-amber-400'
+                        : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                    }`}
+                  >
+                    {dailyConfig.forceOpen ? 'FORÇADO ATIVO' : 'MODO NORMAL (21h)'}
+                  </button>
+                </div>
+
+                {/* Simulador de Teste do Admin */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-bold text-slate-400 hidden sm:inline">Simular Teste:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRunAdminTest('buy')}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white border border-slate-700 transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>🧪 Testar COMPRA</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRunAdminTest('sell')}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white border border-slate-700 transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>🧪 Testar VENDA</span>
+                  </button>
+                </div>
+
+              </div>
+
+              {/* Resultado do Teste Imediato */}
+              {adminTestResult && (
+                <div className={`mt-3 p-3.5 rounded-xl border text-xs font-mono flex items-center justify-between ${
+                  adminTestResult.won
+                    ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-200'
+                    : 'bg-rose-950/70 border-rose-500/60 text-rose-200'
+                }`}>
+                  <span>{adminTestResult.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAdminTestResult(null)}
+                    className="text-slate-400 hover:text-white ml-2 cursor-pointer font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Quick Actions & Audit Trail */}
@@ -1863,9 +2047,9 @@ export default function AdminPage() {
                         <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Diretriz de Alta</span>
                         <TrendingUp className="w-5 h-5 text-emerald-400" />
                       </div>
-                      <span className="text-xl font-black text-emerald-300">COMPRAR</span>
-                      <span className="text-[11px] text-slate-400 mt-1">
-                        Utilizadores verão o botão verde &quot;Lucro de Trading - Toque para receber&quot;
+                      <span className="text-xl font-black text-emerald-300">COMPRAR (Alta)</span>
+                      <span className="text-[11px] text-slate-300 mt-1">
+                        Tendência de Alta: Investidores que clicarem COMPRAR às 21h ganham +4,73% do saldo. Quem vender perde 100 MT.
                       </span>
                     </button>
 
@@ -1876,17 +2060,17 @@ export default function AdminPage() {
                       disabled={isSavingDaily}
                       className={`p-4 rounded-2xl border transition text-left cursor-pointer flex flex-col justify-between ${
                         dailyConfig.actionType === 'sell'
-                          ? 'bg-blue-950/70 border-blue-500 text-white shadow-lg shadow-blue-500/20 ring-2 ring-blue-500/50'
+                          ? 'bg-rose-950/70 border-rose-500 text-white shadow-lg shadow-rose-500/20 ring-2 ring-rose-500/50'
                           : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-blue-400">Diretriz de Baixa</span>
-                        <TrendingDown className="w-5 h-5 text-blue-400" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-rose-400">Diretriz de Baixa</span>
+                        <TrendingDown className="w-5 h-5 text-rose-400" />
                       </div>
-                      <span className="text-xl font-black text-blue-300">VENDER</span>
-                      <span className="text-[11px] text-slate-400 mt-1">
-                        Utilizadores verão o botão de venda &quot;Lucro de Trading - Toque para receber&quot;
+                      <span className="text-xl font-black text-rose-300">VENDER (Baixa)</span>
+                      <span className="text-[11px] text-slate-300 mt-1">
+                        Tendência de Baixa: Investidores que clicarem VENDER às 21h ganham +4,73% do saldo. Quem comprar perde 100 MT.
                       </span>
                     </button>
                   </div>

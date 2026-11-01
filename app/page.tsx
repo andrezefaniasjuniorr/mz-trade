@@ -66,6 +66,7 @@ import {
   WithdrawalWindowDetails
 } from '@/lib/maputoTime';
 import { WalletBalanceChart } from '@/components/WalletBalanceChart';
+import Janela21hTerminal from '@/components/Janela21hTerminal';
 import {
   onAuthStateChanged,
   signInAnonymously,
@@ -1858,156 +1859,15 @@ export default function Home() {
               </div>
 
               {/* ======================================================== */}
-              {/* SESSÃO 21H: JANELA DE RECOMPENSA NOTURNA CRESCENTE (1X AO DIA) */}
+              {/* SESSÃO 21H: TERMINAL FOREX & JANELA OPERACIONAL (24/24H) */}
               {/* ======================================================== */}
-              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 rounded-3xl p-6 text-white border border-slate-800 shadow-xl relative overflow-hidden">
-                {/* Background glow */}
-                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
-
-                {/* Header with Title and Maputo Clock */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4 relative z-10">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 text-white flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
-                      <Zap className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-base font-black tracking-tight text-white">
-                          Janela 21h • Recompensa de Trading Diária
-                        </h2>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          100% Virtual • 1x Por Dia
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Sessão oficial das 21:00 às 21:30 (Horário de Maputo). Recompensa proporcional ao capital acumulado.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Relógio de Maputo */}
-                  <div className="flex items-center gap-3 bg-slate-950/80 px-4 py-2 rounded-2xl border border-slate-800 shrink-0">
-                    <Clock className="w-4 h-4 text-amber-400" />
-                    <div>
-                      <span className="text-[10px] font-mono uppercase text-slate-400 block">Hora de Moçambique (CAT, UTC+2)</span>
-                      <span className="text-sm font-black font-mono text-white tracking-widest">{maputoTime.timeFormatted}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Content according to the 3 rules */}
-                <div className="mt-5 relative z-10">
-                  
-                  {/* CASO A: Fora do Horário 21:00 - 21:30 Maputo (e not forceOpen) */}
-                  {!is21hWindowActive && (
-                    <div className="p-5 bg-slate-950/90 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="flex items-center space-x-3.5">
-                        <div className="p-3 bg-slate-800/80 rounded-xl text-slate-400 shrink-0">
-                          <Lock className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-black text-slate-200">
-                            Mercado Fechado - Volta às 21h
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            {maputoTime.statusMessage}. A janela de coleta diária abre pontualmente às 21:00 e encerra às 21:30 (Horário de Maputo).
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-center shrink-0">
-                        <span className="text-[10px] uppercase font-mono text-slate-400 block">Horário da Janela</span>
-                        <span className="text-xs font-black text-amber-400 font-mono">21:00 — 21:30</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* CASO C: Janela Aberta E Usuário JÁ Coletou Hoje */}
-                  {userClaimedToday && (
-                    <div className="p-5 bg-slate-950/90 rounded-2xl border border-emerald-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="flex items-center space-x-3.5">
-                        <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl shrink-0 border border-emerald-500/30">
-                          <CheckCircle className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-black text-emerald-300">
-                            Você já coletou hoje! Volte amanhã às 21h
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            O seu lucro diário já foi creditado no seu saldo disponível. A próxima sessão de trading estará aberta amanhã às 21:00.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="px-4 py-2 bg-emerald-950/40 border border-emerald-800/40 rounded-xl text-center shrink-0">
-                        <span className="text-[10px] uppercase font-mono text-emerald-300 block">Status da Sessão</span>
-                        <span className="text-xs font-black text-emerald-400">Coleta Confirmada</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* CASO B: Janela Aberta E Usuário NÃO Coletou Hoje -> Mostra APENAS 1 BOTÃO */}
-                  {is21hWindowActive && !userClaimedToday && (
-                    <div className="p-5 bg-slate-950/95 rounded-2xl border border-amber-500/40 shadow-lg space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-                        <div className="flex items-center space-x-2">
-                          <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-                          <span className="text-xs font-bold text-slate-300">
-                            Sessão Noturna Ativa • Ação Oficial do Dia definida pela Mesa:
-                          </span>
-                          <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black border ${
-                            dailyConfig.actionType === 'buy'
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                              : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                          }`}>
-                            {dailyConfig.actionType === 'buy' ? 'COMPRAR (Alta)' : 'VENDER (Baixa)'}
-                          </span>
-                        </div>
-
-                        <span className="text-[11px] text-amber-400 font-mono font-bold">
-                          Janela encerra às 21:30
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-slate-400">
-                        Toque no botão abaixo para executar a ordem oficial e receber o seu incremento de capital acumulado. O saldo só sobe!
-                      </p>
-
-                      {/* APENAS 1 BOTÃO (COMPRAR ou VENDER conforme admin_config/daily.actionType) com texto "Lucro de Trading - Toque para receber" */}
-                      <button
-                        type="button"
-                        onClick={handleClaimDailyReward}
-                        disabled={isClaimingReward}
-                        className={`w-full py-4 px-6 rounded-2xl font-black text-sm tracking-wide shadow-2xl transition transform active:scale-98 flex items-center justify-center space-x-3 cursor-pointer ${
-                          dailyConfig.actionType === 'buy'
-                            ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/50'
-                            : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-600/30 ring-2 ring-blue-400/50'
-                        } disabled:opacity-60`}
-                      >
-                        {isClaimingReward ? (
-                          <>
-                            <RefreshCw className="w-5 h-5 animate-spin" />
-                            <span>A liquidar ordem no mercado...</span>
-                          </>
-                        ) : (
-                          <>
-                            {dailyConfig.actionType === 'buy' ? (
-                              <TrendingUp className="w-5 h-5 text-white" />
-                            ) : (
-                              <TrendingDown className="w-5 h-5 text-white" />
-                            )}
-                            <span className="text-base">Lucro de Trading - Toque para receber</span>
-                            <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full font-mono">
-                              {dailyConfig.actionType === 'buy' ? 'COMPRAR' : 'VENDER'}
-                            </span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                </div>
-              </div>
+              <Janela21hTerminal
+                dailyConfig={dailyConfig}
+                onOrderExecuted={(newBal) => {
+                  setLocalBalance(newBal);
+                  showToast('Ordem liquidada e saldo atualizado no terminal.', 'success');
+                }}
+              />
 
               {/* Chart & Quick Watchlist */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
