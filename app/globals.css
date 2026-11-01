@@ -4,21 +4,39 @@
 html { 
   visibility: visible; 
   opacity: 1; 
+  background-color: #0f172a;
 }
 
-body { 
-  background: #f8fafc; 
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+  background-color: #0f172a;
 }
 
-/* Fix global para visibilidade de formulários e inputs (fundo branco, texto nítido #0f172a) */
+/* Fix para formulários e inputs */
 input, select, textarea {
-  color: #0f172a !important;
-  background-color: #ffffff !important;
-  -webkit-text-fill-color: #0f172a !important;
+  color: #0f172a;
+  background-color: #ffffff;
+}
+
+/* Inputs em páginas com tema escuro (Chat, Admin, Terminal) */
+.bg-slate-950 input,
+.bg-slate-950 textarea,
+.bg-slate-950 select,
+.bg-slate-900 input,
+.bg-slate-900 textarea,
+.bg-slate-900 select,
+.bg-\[\#111a2e\] input,
+.bg-\[\#0a1020\] input,
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+  color: #f8fafc !important;
+  background-color: #020617 !important;
+  -webkit-text-fill-color: #f8fafc !important;
 }
 
 input::placeholder, textarea::placeholder {
-  color: #94a3b8 !important;
-  opacity: 1 !important;
-  -webkit-text-fill-color: #94a3b8 !important;
+  color: #94a3b8;
+  opacity: 1;
 }

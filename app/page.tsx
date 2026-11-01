@@ -841,6 +841,19 @@ export default function Home() {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
+  // Código de Convite Garantido e Instantâneo (Bug 1 Fix - Zero Loading)
+  const fallbackCode = user ? (user.uid.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'TRBONUS5') : 'TRBONUS5';
+  const displayInviteCode = userProfile?.inviteCode || fallbackCode;
+
+  // Se o usuário existir e ainda não tiver inviteCode no Firestore, salva em background
+  useEffect(() => {
+    if (user && !userProfile?.inviteCode) {
+      const genCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const userRef = doc(db, 'users', user.uid);
+      setDoc(userRef, { inviteCode: genCode }, { merge: true }).catch(() => {});
+    }
+  }, [user, userProfile?.inviteCode]);
+
   // Route Protection: Redirect to /login if user is not authenticated
   useEffect(() => {
     if (!authLoading && !user) {
@@ -3181,37 +3194,40 @@ export default function Home() {
                   <label className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">
                     O Seu Link de Convite
                   </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={userProfile?.inviteCode ? `https://taprise.pages.dev/register?ref=${userProfile.inviteCode}` : 'A gerar código de convite...'}
-                      className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      disabled={!userProfile?.inviteCode}
-                      onClick={() => {
-                        if (userProfile?.inviteCode) {
-                          handleCopyText(`https://taprise.pages.dev/register?ref=${userProfile.inviteCode}`, 'Link de Convite');
-                        }
-                      }}
-                      className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
-                    >
-                      {copiedField === 'Link de Convite' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700">Copiado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copiar</span>
-                        </>
-                      )}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`https://taprise.pages.dev/register?ref=${displayInviteCode}`}
+                        className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleCopyText(`https://taprise.pages.dev/register?ref=${displayInviteCode}`, 'Link de Convite');
+                        }}
+                        className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        {copiedField === 'Link de Convite' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700">Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-blue-200 pt-1">
+                      <span>Código de Convite:</span>
+                      <span className="font-mono font-bold text-white bg-white/20 px-2 py-0.5 rounded-md">
+                        {displayInviteCode}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
                 {/* Metrics */}
                 <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/15">
@@ -3305,7 +3321,7 @@ export default function Home() {
       </div>
 
       {/* MOBILE BOTTOM NAVIGATION BAR (Reajustada sem comunidade - [Início, Mercados, Carteira, Perfil, Chat]) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 z-40 px-3 py-1.5 flex justify-around items-center shadow-lg">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-white border-t border-slate-100 z-50 px-3 py-1.5 flex justify-around items-center shadow-lg">
         {[
           { id: 'inicio', label: 'Início', icon: BarChart2 },
           { id: 'mercados', label: 'Mercados', icon: TrendingUp },

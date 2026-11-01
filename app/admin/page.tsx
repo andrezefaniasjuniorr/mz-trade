@@ -279,6 +279,73 @@ export default function AdminPage() {
   const [selectedUserForCredit, setSelectedUserForCredit] = useState<UserRecord | null>(null);
   const [creditAmount, setCreditAmount] = useState<string>('5000');
   const [isCrediting, setIsCrediting] = useState<boolean>(false);
+  // Referrer Lookup (Bug 3 Fix - Inline lookup)
+  const referrerFromList = selectedUserForCredit?.invitedBy
+    ? (() => {
+        const invUid = selectedUserForCredit.invitedBy;
+        const invCode = selectedUserForCredit.invitedByCode || invUid.slice(0, 8);
+        const inMem = usersList.find((u) => u.id === invUid || u.uid === invUid);
+        if (inMem) {
+          return {
+            nome: inMem.nome || inMem.email || 'Investidor Indicador',
+            email: inMem.email || '',
+            code: invCode || inMem.inviteCode || invUid.slice(0, 8)
+          };
+        }
+        return null;
+      })()
+    : null;
+
+  const [fetchedReferrer, setFetchedReferrer] = useState<{
+    nome: string;
+    email: string;
+    code: string;
+  } | null>(null);
+
+  const targetInvitedBy = selectedUserForCredit?.invitedBy;
+  const targetInvitedByCode = selectedUserForCredit?.invitedByCode;
+
+  useEffect(() => {
+    if (!targetInvitedBy || referrerFromList) {
+      return;
+    }
+    const invCode = targetInvitedByCode || targetInvitedBy.slice(0, 8);
+    let active = true;
+
+    getDoc(doc(db, 'users', targetInvitedBy))
+      .then((snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const d = snap.data();
+          setFetchedReferrer({
+            nome: d.nome || d.displayName || d.email || 'Investidor Indicador',
+            email: d.email || '',
+            code: invCode || d.inviteCode || targetInvitedBy.slice(0, 8)
+          });
+        } else {
+          setFetchedReferrer({
+            nome: 'Indicador TapRise',
+            email: '',
+            code: invCode
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setFetchedReferrer({
+            nome: 'Indicador TapRise',
+            email: '',
+            code: invCode
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [targetInvitedBy, targetInvitedByCode, referrerFromList]);
+
+  const referrerDetails = referrerFromList || fetchedReferrer;
 
   // Market hours & pause configuration
   const [marketConfig, setMarketConfig] = useState<MarketHoursConfig>({
@@ -1160,7 +1227,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col">
+    <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans flex flex-col pb-24" style={{ backgroundColor: '#0f172a' }}>
       {/* Toast Notification */}
       {toast && (
         <div className="fixed top-5 right-5 z-50 animate-bounce">
@@ -1944,18 +2011,50 @@ export default function AdminPage() {
                 </span>
               </div>
 
-              {/* Aviso de Bónus de Convite de 5% */}
-              {selectedUserForCredit.invitedBy && !selectedUserForCredit.commissionPaid && (
-                <div className="p-3 bg-blue-950/60 border border-blue-500/40 rounded-2xl space-y-1 text-xs">
-                  <div className="flex items-center justify-between text-blue-300 font-bold">
-                    <span>🎁 Bónus de Convite (5%)</span>
-                    <span className="font-mono text-amber-300 font-black">
-                      +{((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
+              {/* Detalhes de Indicação e Bónus de Convite (5%) */}
+              {selectedUserForCredit.invitedBy && (
+                <div className="p-3.5 bg-blue-950/70 border border-blue-500/50 rounded-2xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between border-b border-blue-800/60 pb-2">
+                    <span className="text-blue-300 font-bold flex items-center gap-1.5">
+                      <span>🎁 Sistema de Indicação</span>
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      selectedUserForCredit.commissionPaid
+                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}>
+                      {selectedUserForCredit.commissionPaid ? 'Bônus já pago' : '1º Crédito • 5% a Pagar'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-300">
-                    Este utilizador foi indicado (código: <span className="font-mono text-white font-bold">{selectedUserForCredit.invitedByCode || selectedUserForCredit.invitedBy.slice(0, 8)}</span>). 5% deste 1º crédito será pago automaticamente ao indicador!
-                  </p>
+
+                  <div className="text-slate-200 space-y-1">
+                    <p>
+                      <strong className="text-slate-400">Convidado por:</strong>{' '}
+                      <span className="text-white font-bold">{referrerDetails?.nome || 'A carregar indicador...'}</span>
+                      {referrerDetails?.email && (
+                        <span className="text-slate-400 font-mono text-[11px]"> ({referrerDetails.email})</span>
+                      )}
+                      {' - '}
+                      <span className="font-mono text-amber-300 font-bold">[{referrerDetails?.code || selectedUserForCredit.invitedByCode || selectedUserForCredit.invitedBy.slice(0, 8)}]</span>
+                    </p>
+
+                    {!selectedUserForCredit.commissionPaid ? (
+                      <div className="mt-2 pt-2 border-t border-blue-900/60 space-y-1">
+                        <p className="text-emerald-300 font-bold text-xs">
+                          Este é o primeiro crédito. O indicador vai ganhar 5% = {((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
+                        </p>
+                        <p className="text-[11px] text-slate-300 font-mono">
+                          Exemplo: Valor a creditar: {parseFloat(creditAmount) || 0} MT -&gt; Bônus para o indicador: {((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-2 pt-2 border-t border-blue-900/60 text-slate-400">
+                        <p className="text-slate-400 italic text-[11px]">
+                          ✓ Bônus de 5% já pago anteriormente ao indicador. Não haverá novo pagamento.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

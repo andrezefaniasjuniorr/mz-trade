@@ -1440,7 +1440,7 @@ export default function ChatPage() {
   }, [isAdmin, privateChatsList, adminSelectedUserId]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
+    <div className="h-screen w-screen flex flex-col bg-[#0f172a] text-slate-100 overflow-hidden font-sans select-none" style={{ backgroundColor: '#0f172a' }}>
       
       {/* Toast Alert */}
       {toast && (
@@ -1577,13 +1577,14 @@ export default function ChatPage() {
       {/* VISTA 1: CHAT DO GRUPO (AO VIVO)                                  */}
       {/* ================================================================= */}
       {activeSegment === 'grupo' && (
-        <div className="flex-1 flex flex-col min-h-0 relative bg-slate-950">
+        <div className="flex-1 flex flex-col min-h-0 relative bg-[#0f172a]" style={{ backgroundColor: '#0f172a' }}>
           
           {/* Stream de Mensagens com Scroll */}
           <div
             ref={chatContainerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 relative"
+            className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 relative pb-28"
+            style={{ backgroundColor: '#0f172a' }}
           >
             {isLoadingMessages && messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center space-y-3 py-20">
@@ -1754,7 +1755,7 @@ export default function ChatPage() {
           </AnimatePresence>
 
           {/* Input do Grupo com Ícone [📷] à esquerda + Botão Enviar */}
-          <footer className="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 shrink-0 z-30">
+          <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 p-3 sm:p-4 z-40" style={{ backgroundColor: '#0f172a' }}>
             <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-center space-x-2">
               
               {/* Botão [📷] para abrir file picker */}
@@ -1948,7 +1949,8 @@ export default function ChatPage() {
             {/* Mensagens Privadas */}
             <div
               ref={privateContainerRef}
-              className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3"
+              className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 pb-28"
+              style={{ backgroundColor: '#0f172a' }}
             >
               {isLoadingPrivateMessages ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-2 py-10">
@@ -2012,7 +2014,7 @@ export default function ChatPage() {
             </AnimatePresence>
 
             {/* Input do Chat Privado com Câmera */}
-            <footer className="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 shrink-0">
+            <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 p-3 sm:p-4 z-40" style={{ backgroundColor: '#0f172a' }}>
               <form onSubmit={handleSendPrivateMessage} className="max-w-5xl mx-auto flex items-center space-x-2">
                 <button
                   type="button"

@@ -374,17 +374,17 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
       {/* ======================================================== */}
       {/* 2. GRÁFICO REAL DE FOREX (Velas Japonesas / Linha) */}
       {/* ======================================================== */}
-      <div className="mt-3 bg-slate-950/70 rounded-xl border border-slate-800/80 p-3 relative">
+      <div className="mt-3 bg-slate-950/70 rounded-xl border border-slate-800/80 p-3 relative overflow-hidden max-w-full w-full">
         
         {/* Barra de Controles: Tipo de Gráfico & Timeframes */}
-        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-900 text-xs">
+        <div className="flex flex-wrap items-center justify-between pb-2 mb-2 border-b border-slate-900 text-xs gap-2 max-w-full overflow-hidden">
           
           {/* Tipo de Gráfico */}
-          <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+          <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-800 shrink-0 max-w-full">
             <button
               type="button"
               onClick={() => setChartType('candle')}
-              className={`px-2.5 py-1 rounded font-bold transition cursor-pointer text-xs ${
+              className={`px-2.5 py-1 rounded font-bold transition cursor-pointer text-xs shrink-0 ${
                 chartType === 'candle' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -393,7 +393,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
             <button
               type="button"
               onClick={() => setChartType('line')}
-              className={`px-2.5 py-1 rounded font-bold transition cursor-pointer text-xs ${
+              className={`px-2.5 py-1 rounded font-bold transition cursor-pointer text-xs shrink-0 ${
                 chartType === 'line' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >

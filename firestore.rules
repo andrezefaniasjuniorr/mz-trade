@@ -16,8 +16,7 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
+      allow read: if isSignedIn();
       allow create, update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
 
@@ -28,6 +27,11 @@ service cloud.firestore {
       match /trade_history/{tradeId} {
         allow read, write: if isOwner(userId) || isAdmin();
       }
+    }
+
+    // Commissions collection (5% referral bonus)
+    match /commissions/{commId} {
+      allow read, write: if isSignedIn();
     }
 
     // Usuarios collection (synchronized with users)

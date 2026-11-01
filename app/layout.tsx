@@ -59,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta property="og:type" content="website" />
         <meta property="og:image" content="https://taprise.pages.dev/logo.png" />
       </head>
-      <body suppressHydrationWarning className="bg-slate-50 text-slate-900 antialiased min-h-screen">
+      <body suppressHydrationWarning className="bg-[#0f172a] text-slate-900 antialiased min-h-screen overflow-x-hidden">
         <AuthProvider>
           <OfflineBanner />
           {children}

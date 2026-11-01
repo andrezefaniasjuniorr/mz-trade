@@ -32,12 +32,7 @@ export const ADMIN_EMAIL = 'garotoestranho454@gmail.com';
  * Gera um código de convite único de 8 caracteres alfanuméricos
  */
 export function generateInviteCode(): string {
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  return Math.random().toString(36).substring(2, 10).toUpperCase();
 }
 
 export interface UserProfile {
@@ -138,17 +133,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // REGRA NOVA: Todas as contas devem iniciar sem saldo nenhum com 0 MT
   const fetchUserProfile = useCallback(async (uid: string, fallbackEmail = '', fallbackName = ''): Promise<UserProfile> => {
     const cached = getCachedProfile(uid);
+    const guaranteedCode = cached?.inviteCode || generateInviteCode();
 
-    const defaultFallback: UserProfile = cached || {
-      uid,
-      nome: fallbackName || 'Investidor TapRise',
-      email: fallbackEmail || 'investidor@taprise.co.mz',
-      idade: 21,
-      provincia: 'Maputo Cidade',
-      saldoVirtual: 0.0,
-      balance: 0.0,
-      patrimonioTotal: 0.0
-    };
+    const defaultFallback: UserProfile = cached
+      ? { ...cached, inviteCode: cached.inviteCode || guaranteedCode }
+      : {
+          uid,
+          nome: fallbackName || 'Investidor TapRise',
+          email: fallbackEmail || 'investidor@taprise.co.mz',
+          idade: 21,
+          provincia: 'Maputo Cidade',
+          saldoVirtual: 0.0,
+          balance: 0.0,
+          patrimonioTotal: 0.0,
+          inviteCode: guaranteedCode
+        };
 
     try {
       const userRef = doc(db, 'users', uid);
@@ -163,8 +162,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         let inviteCode = data.inviteCode;
         if (!inviteCode) {
-          inviteCode = generateInviteCode();
-          setDoc(userRef, { inviteCode }, { merge: true }).catch(() => {});
+          inviteCode = guaranteedCode;
+          updateDoc(userRef, { inviteCode }).catch(() => {
+            setDoc(userRef, { inviteCode }, { merge: true }).catch(() => {});
+          });
         }
 
         const profile: UserProfile = {
