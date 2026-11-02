@@ -77,6 +77,10 @@ interface WithdrawalAdminRecord {
   requestedAt?: any;
   dateStr?: string;
   fee?: number;
+  totalDebited?: number;
+  remainingBalance?: number;
+  fechadoEm?: any;
+  processedBy?: string;
 }
 
 interface UserRecord {
@@ -279,30 +283,67 @@ export default function AdminPage() {
   const [selectedUserForCredit, setSelectedUserForCredit] = useState<UserRecord | null>(null);
   const [creditAmount, setCreditAmount] = useState<string>('5000');
   const [isCrediting, setIsCrediting] = useState<boolean>(false);
-  // Referrer Lookup (Bug 3 Fix - Inline lookup)
-  const referrerFromList = selectedUserForCredit?.invitedBy
-    ? (() => {
-        const invUid = selectedUserForCredit.invitedBy;
-        const invCode = selectedUserForCredit.invitedByCode || invUid.slice(0, 8);
-        const inMem = usersList.find((u) => u.id === invUid || u.uid === invUid);
-        if (inMem) {
-          return {
-            nome: inMem.nome || inMem.email || 'Investidor Indicador',
-            email: inMem.email || '',
-            code: invCode || inMem.inviteCode || invUid.slice(0, 8)
-          };
-        }
-        return null;
-      })()
-    : null;
+  const [manualReferrerUid, setManualReferrerUid] = useState<string>('');
+  const [isPayingBonus, setIsPayingBonus] = useState<boolean>(false);
+  const [showManualReferralSelect, setShowManualReferralSelect] = useState<boolean>(false);
+
+  // Referrer Lookup: tenta por invitedBy, depois por invitedByCode, depois manualReferrerUid
+  const referrerFromList = useMemo(() => {
+    if (!selectedUserForCredit) return null;
+    const invUid = selectedUserForCredit.invitedBy || manualReferrerUid;
+    const invCode = (selectedUserForCredit.invitedByCode || '').toUpperCase().trim();
+
+    // 1. Procurar por UID direto se disponível
+    if (invUid) {
+      const inMem = usersList.find((u) => u.id === invUid || u.uid === invUid);
+      if (inMem) {
+        return {
+          id: inMem.id,
+          nome: inMem.nome || inMem.email || 'Investidor Indicador',
+          email: inMem.email || '',
+          code: invCode || inMem.inviteCode || invUid.slice(0, 8),
+          balance: inMem.balance ?? inMem.saldoVirtual ?? 0
+        };
+      }
+    }
+
+    // 2. Se não tem invitedBy mas tem invitedByCode, procurar pelo código no usersList
+    if (invCode) {
+      const inMemByCode = usersList.find((u) => {
+        const uCode = (u.inviteCode || '').toUpperCase().trim();
+        const uIdUpper = u.id.toUpperCase();
+        const uCleanId = u.id.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        return (
+          u.id !== selectedUserForCredit.id &&
+          (uCode === invCode ||
+            uIdUpper.startsWith(invCode) ||
+            uCleanId.startsWith(invCode) ||
+            u.id === invCode)
+        );
+      });
+      if (inMemByCode) {
+        return {
+          id: inMemByCode.id,
+          nome: inMemByCode.nome || inMemByCode.email || 'Investidor Indicador',
+          email: inMemByCode.email || '',
+          code: invCode || inMemByCode.inviteCode || inMemByCode.id.slice(0, 8),
+          balance: inMemByCode.balance ?? inMemByCode.saldoVirtual ?? 0
+        };
+      }
+    }
+
+    return null;
+  }, [selectedUserForCredit, manualReferrerUid, usersList]);
 
   const [fetchedReferrer, setFetchedReferrer] = useState<{
+    id?: string;
     nome: string;
     email: string;
     code: string;
+    balance?: number;
   } | null>(null);
 
-  const targetInvitedBy = selectedUserForCredit?.invitedBy;
+  const targetInvitedBy = selectedUserForCredit?.invitedBy || referrerFromList?.id;
   const targetInvitedByCode = selectedUserForCredit?.invitedByCode;
 
   useEffect(() => {
@@ -318,12 +359,15 @@ export default function AdminPage() {
         if (snap.exists()) {
           const d = snap.data();
           setFetchedReferrer({
+            id: snap.id,
             nome: d.nome || d.displayName || d.email || 'Investidor Indicador',
             email: d.email || '',
-            code: invCode || d.inviteCode || targetInvitedBy.slice(0, 8)
+            code: invCode || d.inviteCode || targetInvitedBy.slice(0, 8),
+            balance: d.balance ?? d.saldoVirtual ?? 0
           });
         } else {
           setFetchedReferrer({
+            id: targetInvitedBy,
             nome: 'Indicador TapRise',
             email: '',
             code: invCode
@@ -333,6 +377,7 @@ export default function AdminPage() {
       .catch(() => {
         if (active) {
           setFetchedReferrer({
+            id: targetInvitedBy,
             nome: 'Indicador TapRise',
             email: '',
             code: invCode
@@ -673,22 +718,98 @@ export default function AdminPage() {
     return adminWithdrawals.filter((w) => w.status === 'PENDING').length;
   }, [adminWithdrawals]);
 
-  // Ação Admin: Atualizar estado do Levantamento
-  const handleUpdateWithdrawalStatus = async (id: string, newStatus: 'COMPLETED' | 'REJECTED') => {
+  // Ação Admin: Fechar / Concluir Levantamento (após transferência via M-Pesa / e-Mola)
+  const handleCloseWithdrawal = async (w: WithdrawalAdminRecord) => {
     try {
-      const wRef = doc(db, 'withdrawals', id);
+      const wRef = doc(db, 'withdrawals', w.id);
       await updateDoc(wRef, {
-        status: newStatus,
-        statusMessage: newStatus === 'COMPLETED' ? 'Levantamento transferido com sucesso para a carteira móvel.' : 'Levantamento rejeitado pela administração.',
+        status: 'COMPLETED',
+        statusMessage: 'Transferência efetuada com sucesso pelo Administrador via carteira móvel.',
         processedAt: serverTimestamp(),
-        processedBy: user?.email || 'admin'
+        processedBy: user?.email || ADMIN_EMAIL,
+        fechadoEm: serverTimestamp()
       });
+
+      // Registar confirmação na coleção 'transactions'
+      if (w.uid) {
+        await addDoc(collection(db, 'transactions'), {
+          uid: w.uid,
+          userId: w.uid,
+          userEmail: w.userEmail || '',
+          userName: w.userName || 'Investidor',
+          type: 'withdrawal_closed',
+          amount: w.amount || 0,
+          status: 'COMPLETED',
+          adminEmail: user?.email || ADMIN_EMAIL,
+          timestamp: serverTimestamp(),
+          description: `Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT via ${w.operator || 'Móvel'} (${w.phoneNumber || ''}) FECHADO e concluído com sucesso.`
+        });
+      }
+
       showToast(
-        newStatus === 'COMPLETED' ? 'Levantamento marcado como CONCLUÍDO com sucesso!' : 'Levantamento marcado como CANCELADO.',
+        `✓ Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT para ${w.userName || 'o investidor'} foi FECHADO com sucesso!`,
         'success'
       );
     } catch (e: any) {
-      showToast(`Erro ao atualizar estado: ${e.message}`, 'error');
+      showToast(`Erro ao fechar pedido: ${e.message}`, 'error');
+    }
+  };
+
+  // Ação Admin: Rejeitar Levantamento e Estornar Saldo Total
+  const handleRejectWithdrawal = async (w: WithdrawalAdminRecord) => {
+    try {
+      const wRef = doc(db, 'withdrawals', w.id);
+      await updateDoc(wRef, {
+        status: 'REJECTED',
+        statusMessage: 'Levantamento rejeitado pela administração. Saldo total estornado.',
+        processedAt: serverTimestamp(),
+        processedBy: user?.email || ADMIN_EMAIL
+      });
+
+      // Devolver o saldo total debitado (incluindo taxa de 5%)
+      if (w.uid) {
+        const refundAmount = Number(w.totalDebited || ((w.amount || 0) * 1.05));
+        const userRef = doc(db, 'users', w.uid);
+        await updateDoc(userRef, {
+          balance: increment(refundAmount),
+          saldoVirtual: increment(refundAmount),
+          patrimonioTotal: increment(refundAmount),
+          atualizadoEm: serverTimestamp()
+        });
+        try {
+          await updateDoc(doc(db, 'usuarios', w.uid), {
+            saldoDisponivel: increment(refundAmount),
+            saldoTotal: increment(refundAmount)
+          });
+        } catch {}
+
+        await addDoc(collection(db, 'transactions'), {
+          uid: w.uid,
+          userId: w.uid,
+          userEmail: w.userEmail || '',
+          userName: w.userName || 'Investidor',
+          type: 'withdrawal_refund',
+          amount: refundAmount,
+          status: 'REFUNDED',
+          timestamp: serverTimestamp(),
+          description: `Estorno de levantamento rejeitado: +${refundAmount.toFixed(2)} MT devolvidos à conta.`
+        });
+      }
+
+      showToast('Pedido rejeitado e saldo total estornado à conta do investidor.', 'info');
+    } catch (e: any) {
+      showToast(`Erro ao rejeitar pedido: ${e.message}`, 'error');
+    }
+  };
+
+  // Compatibilidade legada
+  const handleUpdateWithdrawalStatus = async (id: string, newStatus: 'COMPLETED' | 'REJECTED') => {
+    const target = adminWithdrawals.find(w => w.id === id);
+    if (!target) return;
+    if (newStatus === 'COMPLETED') {
+      await handleCloseWithdrawal(target);
+    } else {
+      await handleRejectWithdrawal(target);
     }
   };
 
@@ -803,12 +924,13 @@ export default function AdminPage() {
         description: `Crédito de saldo (+${amountNum.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT) pelo Administrador`
       });
 
-      // 4. REQUISITO 3: Pagar 5% de comissão ao indicador se for o 1º crédito e tiver invitedBy
-      if (selectedUserForCredit.invitedBy && !selectedUserForCredit.commissionPaid) {
-        const referrerUid = selectedUserForCredit.invitedBy;
+      // 4. REQUISITO 3: Pagar 5% de comissão ao indicador se for o 1º crédito e tiver indicador
+      const effectiveReferrerUid = selectedUserForCredit.invitedBy || referrerDetails?.id || manualReferrerUid;
+      if (effectiveReferrerUid && !selectedUserForCredit.commissionPaid && effectiveReferrerUid !== targetUserId) {
+        const referrerUid = effectiveReferrerUid;
         const commissionAmount = Number((amountNum * 0.05).toFixed(2));
 
-        if (commissionAmount > 0 && referrerUid !== targetUserId) {
+        if (commissionAmount > 0) {
           try {
             // A. Creditar saldo do indicador em users/{invitedBy}
             const referrerRef = doc(db, 'users', referrerUid);
@@ -847,8 +969,8 @@ export default function AdminPage() {
             await addDoc(collection(db, 'transactions'), {
               userId: referrerUid,
               uid: referrerUid,
-              userName: 'Indicador TapRise',
-              userEmail: '',
+              userName: referrerDetails?.nome || 'Indicador TapRise',
+              userEmail: referrerDetails?.email || '',
               type: 'bonus_convite',
               amount: commissionAmount,
               referredUserId: targetUserId,
@@ -859,12 +981,14 @@ export default function AdminPage() {
 
             // E. Marcar commissionPaid = true para nunca pagar de novo a este usuário
             await updateDoc(userRef, {
+              invitedBy: referrerUid,
               commissionPaid: true,
               commissionPaidAt: serverTimestamp(),
               commissionAmount: commissionAmount
             });
             try {
               await updateDoc(usuarioRef, {
+                invitedBy: referrerUid,
                 commissionPaid: true
               });
             } catch {}
@@ -884,6 +1008,158 @@ export default function AdminPage() {
       showToast(err.message || 'Erro ao creditar saldo no Firestore.', 'error');
     } finally {
       setIsCrediting(false);
+    }
+  };
+
+  // Ação Admin: Creditar 5% diretamente ao Indicador (Apenas 1x por convidado)
+  const handlePay5PercentBonusDirectly = async () => {
+    if (!selectedUserForCredit) return;
+    const targetUserId = selectedUserForCredit.id || selectedUserForCredit.uid;
+    if (!targetUserId) return;
+
+    if (selectedUserForCredit.commissionPaid) {
+      showToast('O bónus de convite de 5% já foi pago para este utilizador! Limite: apenas 1 vez por convidado.', 'info');
+      return;
+    }
+
+    const effectiveReferrerUid = selectedUserForCredit.invitedBy || referrerDetails?.id || manualReferrerUid;
+    if (!effectiveReferrerUid) {
+      showToast('Nenhum indicador selecionado. Selecione ou vincule o indicador abaixo primeiro.', 'error');
+      return;
+    }
+
+    if (effectiveReferrerUid === targetUserId) {
+      showToast('Não é permitido pagar bónus de convite a si mesmo.', 'error');
+      return;
+    }
+
+    try {
+      setIsPayingBonus(true);
+      const baseVal = Math.max(
+        parseFloat(creditAmount) || 0,
+        Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 1000)
+      );
+      const commissionAmount = Number((baseVal * 0.05).toFixed(2));
+
+      // 1. Atualizar saldo do indicador em users/{uid}
+      const refUserDoc = doc(db, 'users', effectiveReferrerUid);
+      await updateDoc(refUserDoc, {
+        balance: increment(commissionAmount),
+        saldoVirtual: increment(commissionAmount),
+        patrimonioTotal: increment(commissionAmount),
+        totalComissoes: increment(commissionAmount),
+        indicadosCount: increment(1),
+        atualizadoEm: serverTimestamp()
+      });
+
+      // 2. Sincronizar usuarios/{uid}
+      try {
+        await updateDoc(doc(db, 'usuarios', effectiveReferrerUid), {
+          saldoDisponivel: increment(commissionAmount),
+          saldoTotal: increment(commissionAmount)
+        });
+      } catch {}
+
+      // 3. Atualizar usuário convidado para commissionPaid = true
+      const targetUserDoc = doc(db, 'users', targetUserId);
+      await updateDoc(targetUserDoc, {
+        invitedBy: effectiveReferrerUid,
+        commissionPaid: true,
+        commissionPaidAt: serverTimestamp(),
+        commissionAmount: commissionAmount,
+        atualizadoEm: serverTimestamp()
+      });
+      try {
+        await updateDoc(doc(db, 'usuarios', targetUserId), {
+          invitedBy: effectiveReferrerUid,
+          commissionPaid: true
+        });
+      } catch {}
+
+      // 4. Registar na coleção 'commissions'
+      await addDoc(collection(db, 'commissions'), {
+        referrerUid: effectiveReferrerUid,
+        referredUid: targetUserId,
+        referredName: selectedUserForCredit.nome || 'Investidor Convidado',
+        referredEmail: selectedUserForCredit.email || '',
+        creditAmount: baseVal,
+        rate: 0.05,
+        commissionAmount: commissionAmount,
+        status: 'paid',
+        paidAt: serverTimestamp(),
+        description: `Bónus de convite de 5% sobre ${baseVal.toFixed(2)} MT`
+      });
+
+      // 5. Registar no histórico do indicador como "Bônus de convite"
+      await addDoc(collection(db, 'transactions'), {
+        userId: effectiveReferrerUid,
+        uid: effectiveReferrerUid,
+        userName: referrerDetails?.nome || 'Indicador TapRise',
+        userEmail: referrerDetails?.email || '',
+        type: 'bonus_convite',
+        amount: commissionAmount,
+        referredUserId: targetUserId,
+        referredUserName: selectedUserForCredit.nome || 'Investidor Convidado',
+        timestamp: serverTimestamp(),
+        description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pela indicação de ${selectedUserForCredit.nome || selectedUserForCredit.email}`
+      });
+
+      // 6. Atualizar estado local
+      setSelectedUserForCredit((prev) => prev ? {
+        ...prev,
+        invitedBy: effectiveReferrerUid,
+        commissionPaid: true
+      } : null);
+
+      setUsersList((prev) => prev.map((u) => {
+        if (u.id === targetUserId) {
+          return { ...u, invitedBy: effectiveReferrerUid, commissionPaid: true };
+        }
+        if (u.id === effectiveReferrerUid) {
+          return {
+            ...u,
+            balance: (u.balance || 0) + commissionAmount,
+            saldoDisponivel: (u.saldoDisponivel || 0) + commissionAmount,
+            totalComissoes: (u.totalComissoes || 0) + commissionAmount
+          };
+        }
+        return u;
+      }));
+
+      showToast(`✓ Sucesso! Bónus de 5% (+${commissionAmount.toFixed(2)} MT) creditado ao indicador ${referrerDetails?.nome || ''}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao creditar bónus de 5%:', err);
+      showToast(err.message || 'Erro ao creditar bónus ao indicador.', 'error');
+    } finally {
+      setIsPayingBonus(false);
+    }
+  };
+
+  // Ação Admin: Vincular Indicador Manualmente
+  const handleLinkReferrer = async () => {
+    if (!selectedUserForCredit || !manualReferrerUid) {
+      showToast('Selecione um investidor da lista para vincular.', 'error');
+      return;
+    }
+    const targetUserId = selectedUserForCredit.id || selectedUserForCredit.uid;
+    if (!targetUserId) return;
+    if (targetUserId === manualReferrerUid) {
+      showToast('O investidor não pode indicar a si mesmo.', 'error');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'users', targetUserId), {
+        invitedBy: manualReferrerUid
+      });
+      try {
+        await updateDoc(doc(db, 'usuarios', targetUserId), {
+          invitedBy: manualReferrerUid
+        });
+      } catch {}
+      setSelectedUserForCredit((prev) => prev ? { ...prev, invitedBy: manualReferrerUid } : null);
+      showToast('Indicador vinculado com sucesso a esta conta!', 'success');
+    } catch (e: any) {
+      showToast(`Erro ao vincular indicador: ${e.message}`, 'error');
     }
   };
 
@@ -1842,7 +2118,7 @@ export default function AdminPage() {
                             {/* Email */}
                             <td className="py-3.5 px-4 text-slate-300 font-mono text-xs">
                               <div>{u.email || '—'}</div>
-                              {u.invitedBy && (
+                              {(u.invitedBy || u.invitedByCode) && (
                                 <div className="mt-1">
                                   <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-bold ${
                                     u.commissionPaid
@@ -1851,6 +2127,11 @@ export default function AdminPage() {
                                   }`}>
                                     {u.commissionPaid ? '✓ 5% Comissão Paga' : '🎁 Convidado (Paga 5%)'}
                                   </span>
+                                  {u.invitedByCode && !u.invitedBy && (
+                                    <span className="block text-[9px] font-mono text-amber-300 mt-0.5">
+                                      Ref: {u.invitedByCode}
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -1902,22 +2183,40 @@ export default function AdminPage() {
 
         {/* MODAL PROFISSIONAL: CREDITAR / GERIR SALDO (REQUISITO 2) */}
         {selectedUserForCredit && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in zoom-in-95 duration-150">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-[#1e293b] pb-3.5">
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
-                    <CreditCard className="w-5 h-5 text-blue-400" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto overflow-x-hidden animate-in zoom-in-95 duration-150">
+              
+              {/* Header com Seta para Recuar (←) e Botão Fechar (X) */}
+              <div className="flex items-center justify-between border-b border-[#1e293b] pb-3 gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedUserForCredit(null);
+                      setShowManualReferralSelect(false);
+                    }}
+                    className="p-2 text-slate-300 hover:text-white rounded-xl bg-[#0a1020] hover:bg-slate-800 border border-[#1e293b] transition cursor-pointer shrink-0 flex items-center gap-1 text-xs font-bold"
+                    title="Recuar"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="hidden sm:inline">Voltar</span>
+                  </button>
+                  <div className="w-9 h-9 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center border border-blue-500/30 shrink-0">
+                    <CreditCard className="w-4.5 h-4.5 text-blue-400" />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white">Creditar / Gerir Saldo</h3>
-                    <p className="text-[11px] text-slate-400">Atribuição Imediata de Saldo Operacional</p>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-black text-white truncate">Creditar / Gerir Saldo</h3>
+                    <p className="text-[11px] text-slate-400 truncate">Atribuição Imediata de Saldo</p>
                   </div>
                 </div>
                 <button
-                  onClick={() => setSelectedUserForCredit(null)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    setSelectedUserForCredit(null);
+                    setShowManualReferralSelect(false);
+                  }}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-[#0a1020] hover:bg-slate-800 border border-[#1e293b] transition cursor-pointer shrink-0"
+                  title="Fechar"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1927,15 +2226,19 @@ export default function AdminPage() {
               <div className="p-3.5 bg-[#0a1020] rounded-2xl border border-[#1e293b] space-y-2 text-xs">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Investidor:</span>
-                  <span className="font-bold text-white text-sm">{selectedUserForCredit.nome || 'Investidor Sem Nome'}</span>
+                  <span className="font-bold text-white text-sm truncate max-w-[200px] text-right">
+                    {selectedUserForCredit.nome || 'Investidor Sem Nome'}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">E-mail:</span>
-                  <span className="font-mono text-slate-300">{selectedUserForCredit.email}</span>
+                  <span className="font-mono text-slate-300 truncate max-w-[200px] text-right">
+                    {selectedUserForCredit.email}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center text-[11px]">
                   <span className="text-slate-500">ID / Província:</span>
-                  <span className="font-mono text-slate-400">
+                  <span className="font-mono text-slate-400 truncate max-w-[200px] text-right">
                     {selectedUserForCredit.id.slice(0, 10)}... {selectedUserForCredit.provincia ? `• ${selectedUserForCredit.provincia}` : ''}
                   </span>
                 </div>
@@ -1952,7 +2255,7 @@ export default function AdminPage() {
               </div>
 
               {/* Botões Rápidos (+1.000 MT, +5.000 MT, +10.000 MT) */}
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Escolha Rápida de Valor
                 </label>
@@ -1966,7 +2269,7 @@ export default function AdminPage() {
                       key={btn.value}
                       type="button"
                       onClick={() => setCreditAmount(btn.value)}
-                      className={`py-2.5 text-xs font-black rounded-xl border transition cursor-pointer ${
+                      className={`py-2 text-xs font-black rounded-xl border transition cursor-pointer ${
                         creditAmount === btn.value
                           ? 'bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-600/30'
                           : 'bg-[#0a1020] text-slate-300 border-[#1e293b] hover:bg-slate-800 hover:text-white'
@@ -2011,62 +2314,210 @@ export default function AdminPage() {
                 </span>
               </div>
 
-              {/* Detalhes de Indicação e Bónus de Convite (5%) */}
-              {selectedUserForCredit.invitedBy && (
-                <div className="p-3.5 bg-blue-950/70 border border-blue-500/50 rounded-2xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between border-b border-blue-800/60 pb-2">
-                    <span className="text-blue-300 font-bold flex items-center gap-1.5">
-                      <span>🎁 Sistema de Indicação</span>
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      selectedUserForCredit.commissionPaid
-                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    }`}>
-                      {selectedUserForCredit.commissionPaid ? 'Bônus já pago' : '1º Crédito • 5% a Pagar'}
-                    </span>
-                  </div>
+              {/* Detalhes de Indicação / Origem do Cadastro */}
+              {(() => {
+                const activeReferrer = referrerDetails;
+                const hasReferrer = Boolean(
+                  activeReferrer ||
+                  selectedUserForCredit.invitedBy ||
+                  selectedUserForCredit.invitedByCode ||
+                  manualReferrerUid
+                );
 
-                  <div className="text-slate-200 space-y-1">
-                    <p>
-                      <strong className="text-slate-400">Convidado por:</strong>{' '}
-                      <span className="text-white font-bold">{referrerDetails?.nome || 'A carregar indicador...'}</span>
-                      {referrerDetails?.email && (
-                        <span className="text-slate-400 font-mono text-[11px]"> ({referrerDetails.email})</span>
+                // Caso 1: Usuário entrou DIRETO (sem convite)
+                if (!hasReferrer && !showManualReferralSelect) {
+                  return (
+                    <div className="p-3.5 bg-[#0a1020] border border-[#1e293b] rounded-2xl space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-xs font-bold">
+                            <Users className="w-3.5 h-3.5 text-slate-400" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-white text-xs block">Origem do Registo</span>
+                            <span className="text-[11px] text-slate-400">Conta Direta (Sem Convite)</span>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700/60">
+                          Sem Indicação
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Este utilizador criou conta diretamente. Não há bónus de convite associado.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowManualReferralSelect(true)}
+                        className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold hover:underline flex items-center gap-1 cursor-pointer pt-0.5"
+                      >
+                        <span>+ Associar indicador manualmente (opcional)</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Caso 2: Usuário TEM indicador ou admin abriu para associar
+                const baseForBonus = Math.max(
+                  parseFloat(creditAmount) || 0,
+                  Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 1000)
+                );
+                const calculatedBonus = Number((baseForBonus * 0.05).toFixed(2));
+                const isPaid = !!selectedUserForCredit.commissionPaid;
+
+                return (
+                  <div className="p-3.5 bg-gradient-to-br from-blue-950/70 to-indigo-950/70 border border-blue-500/40 rounded-2xl space-y-3 text-xs shadow-md max-w-full overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-blue-800/50 pb-2 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-6 h-6 rounded-lg bg-blue-600 text-white font-black flex items-center justify-center text-[10px] shrink-0">
+                          5%
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-white text-xs truncate">Bónus de Convite (5%)</h4>
+                          <p className="text-[10px] text-blue-200 truncate">Comissão ao indicador (1x por convidado)</p>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                        isPaid
+                          ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      }`}>
+                        {isPaid ? '✓ Já Pago' : 'Pendente (5%)'}
+                      </span>
+                    </div>
+
+                    <div className="text-slate-200 space-y-2 max-w-full">
+                      {/* Quem o convidou */}
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="text-slate-400 font-semibold shrink-0">Indicador:</span>
+                        <div className="text-right min-w-0 max-w-[65%]">
+                          {activeReferrer ? (
+                            <div className="truncate">
+                              <span className="text-white font-bold text-xs truncate block">{activeReferrer.nome}</span>
+                              {activeReferrer.email && (
+                                <span className="text-[10px] font-mono text-slate-400 truncate block">{activeReferrer.email}</span>
+                              )}
+                              <span className="text-[10px] font-mono text-amber-300 font-bold">
+                                [{activeReferrer.code || activeReferrer.id?.slice(0, 8)}]
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-amber-400 font-medium italic text-[11px]">
+                              A vincular indicador...
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Seletor manual para associar ou alterar indicador */}
+                      {(!activeReferrer || showManualReferralSelect) && (
+                        <div className="p-2.5 bg-slate-900/95 rounded-xl border border-slate-700 space-y-2 mt-1 max-w-full overflow-hidden">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-slate-300 uppercase">
+                              Selecionar Indicador:
+                            </label>
+                            {showManualReferralSelect && !hasReferrer && (
+                              <button
+                                type="button"
+                                onClick={() => setShowManualReferralSelect(false)}
+                                className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                            )}
+                          </div>
+                          <div className="space-y-1.5 w-full">
+                            <select
+                              value={manualReferrerUid}
+                              onChange={(e) => setManualReferrerUid(e.target.value)}
+                              className="w-full max-w-full px-2.5 py-1.5 bg-slate-800 text-white text-xs rounded-lg border border-slate-700 focus:outline-none truncate"
+                            >
+                              <option value="">Selecione quem o convidou...</option>
+                              {usersList
+                                .filter((u) => u.id !== selectedUserForCredit.id)
+                                .map((u) => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.nome || 'Investidor'} • {u.email} [{u.inviteCode || u.id.slice(0, 6)}]
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={handleLinkReferrer}
+                              disabled={!manualReferrerUid}
+                              className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs cursor-pointer transition"
+                            >
+                              Vincular Indicador
+                            </button>
+                          </div>
+                        </div>
                       )}
-                      {' - '}
-                      <span className="font-mono text-amber-300 font-bold">[{referrerDetails?.code || selectedUserForCredit.invitedByCode || selectedUserForCredit.invitedBy.slice(0, 8)}]</span>
-                    </p>
 
-                    {!selectedUserForCredit.commissionPaid ? (
-                      <div className="mt-2 pt-2 border-t border-blue-900/60 space-y-1">
-                        <p className="text-emerald-300 font-bold text-xs">
-                          Este é o primeiro crédito. O indicador vai ganhar 5% = {((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
-                        </p>
-                        <p className="text-[11px] text-slate-300 font-mono">
-                          Exemplo: Valor a creditar: {parseFloat(creditAmount) || 0} MT -&gt; Bônus para o indicador: {((parseFloat(creditAmount) || 0) * 0.05).toFixed(2)} MT
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="mt-2 pt-2 border-t border-blue-900/60 text-slate-400">
-                        <p className="text-slate-400 italic text-[11px]">
-                          ✓ Bônus de 5% já pago anteriormente ao indicador. Não haverá novo pagamento.
-                        </p>
-                      </div>
-                    )}
+                      {/* Valores Financeiros da Comissão (só quando tem indicador vinculado) */}
+                      {activeReferrer && (
+                        <>
+                          <div className="p-2 bg-blue-900/30 rounded-xl border border-blue-800/40 space-y-1 text-[11px]">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Base de Cálculo:</span>
+                              <span className="font-mono font-bold text-white">
+                                {baseForBonus.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-blue-800/50">
+                              <span className="text-emerald-300 font-bold">Comissão (5%):</span>
+                              <span className="font-mono font-black text-emerald-400 text-xs">
+                                +{calculatedBonus.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-0.5">
+                            {isPaid ? (
+                              <div className="p-2 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-center text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5">
+                                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span>Bónus de 5% já foi pago ao indicador.</span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={handlePay5PercentBonusDirectly}
+                                disabled={isPayingBonus}
+                                className="w-full py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 border border-emerald-400/40"
+                              >
+                                {isPayingBonus ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>A creditar bónus...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                                    <span className="truncate">
+                                      Creditar 5% (+{calculatedBonus.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT) ao Indicador
+                                    </span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Botões: Cancelar e Confirmar Crédito */}
               <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => setSelectedUserForCredit(null)}
+                  onClick={() => {
+                    setSelectedUserForCredit(null);
+                    setShowManualReferralSelect(false);
+                  }}
                   disabled={isCrediting}
                   className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition cursor-pointer"
                 >
-                  Cancelar
+                  Voltar / Cancelar
                 </button>
                 <button
                   type="button"
@@ -2122,6 +2573,25 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              {/* Instruções de Operação */}
+              <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl flex items-start gap-3 text-xs text-emerald-200">
+                <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-white text-sm">
+                    Procedimento de Liquidação:
+                  </p>
+                  <p>
+                    1. Realize a transferência do valor indicado para o número de telemóvel (M-Pesa / e-Mola) do titular.
+                  </p>
+                  <p>
+                    2. A taxa de 5% foi automaticamente debitada do saldo que sobra na conta do investidor.
+                  </p>
+                  <p>
+                    3. <strong>Após realizar a transferência, clique no botão &quot;Fechar&quot; no pedido de levantamento</strong>.
+                  </p>
+                </div>
+              </div>
+
               {adminWithdrawals.length === 0 ? (
                 <div className="p-16 text-center text-slate-500 text-xs space-y-2">
                   <Smartphone className="w-10 h-10 mx-auto text-slate-700" />
@@ -2136,13 +2606,12 @@ export default function AdminPage() {
                     <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800">
                       <tr>
                         <th className="py-3.5 px-4">Data / Hora</th>
-                        <th className="py-3.5 px-4">Investidor</th>
-                        <th className="py-3.5 px-4">Operadora</th>
-                        <th className="py-3.5 px-4">Telemóvel Destino</th>
-                        <th className="py-3.5 px-4">Titular Confirmado</th>
-                        <th className="py-3.5 px-4 text-right">Montante (MT)</th>
+                        <th className="py-3.5 px-4">Pedido (Pessoa &amp; Valor)</th>
+                        <th className="py-3.5 px-4">Operadora &amp; Telemóvel</th>
+                        <th className="py-3.5 px-4 text-right">Transferir ao Cliente</th>
+                        <th className="py-3.5 px-4 text-right">Taxa 5% (Cortada do Saldo)</th>
                         <th className="py-3.5 px-4 text-center">Estado</th>
-                        <th className="py-3.5 px-4 text-right">Ação Administrativa</th>
+                        <th className="py-3.5 px-4 text-right">Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-medium">
@@ -2152,35 +2621,52 @@ export default function AdminPage() {
                           const d = w.requestedAt.toDate();
                           formattedDate = `${d.toLocaleDateString('pt-MZ')} ${d.toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}`;
                         }
+                        const feeValue = w.fee !== undefined ? w.fee : ((w.amount || 0) * 0.05);
+                        const totalDebit = w.totalDebited !== undefined ? w.totalDebited : ((w.amount || 0) + feeValue);
 
                         return (
                           <tr key={w.id} className="hover:bg-slate-800/40 transition">
-                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-400">
+                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">
                               {formattedDate}
                             </td>
                             <td className="py-3.5 px-4">
-                              <span className="font-bold text-white block">{w.userName || 'Investidor'}</span>
-                              <span className="text-[10px] font-mono text-slate-500">{w.userEmail}</span>
+                              <div className="font-bold text-white text-sm">
+                                Pessoa <span className="text-amber-300 font-black">{w.userName || 'Investidor'}</span> levantou{' '}
+                                <span className="text-emerald-400 font-mono font-black">
+                                  {(w.amount || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                                {w.userEmail} {w.uid ? `• UID: ${w.uid.slice(0, 8)}` : ''}
+                              </div>
                             </td>
                             <td className="py-3.5 px-4">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                                w.operator === 'M-Pesa'
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              }`}>
-                                {w.operator}
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                  w.operator === 'M-Pesa'
+                                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                }`}>
+                                  {w.operator}
+                                </span>
+                                <span className="font-mono font-black text-blue-400 text-xs">
+                                  +258 {w.phoneNumber}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                Titular: {w.userName}
                               </span>
                             </td>
-                            <td className="py-3.5 px-4 font-mono font-bold text-blue-400">
-                              +258 {w.phoneNumber}
-                            </td>
-                            <td className="py-3.5 px-4 text-slate-300">
-                              {w.userName}
-                            </td>
-                            <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-400 text-sm">
+                            <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-400 text-sm whitespace-nowrap">
                               {(w.amount || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
                             </td>
-                            <td className="py-3.5 px-4 text-center">
+                            <td className="py-3.5 px-4 text-right font-mono text-xs text-amber-300 whitespace-nowrap">
+                              <div>+{feeValue.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</div>
+                              <div className="text-[10px] text-slate-500 font-sans">
+                                (Total cortado: {totalDebit.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT)
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
                               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
                                 w.status === 'COMPLETED'
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
@@ -2192,34 +2678,36 @@ export default function AdminPage() {
                                   w.status === 'COMPLETED' ? 'bg-emerald-400' : 'bg-amber-400'
                                 }`}></span>
                                 {w.status === 'COMPLETED'
-                                  ? 'Concluído'
+                                  ? '✓ Fechado'
                                   : w.status === 'REJECTED'
                                   ? 'Rejeitado'
                                   : 'Pendente (2-3h)'}
                               </span>
                             </td>
-                            <td className="py-3.5 px-4 text-right space-x-1.5">
+                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
                               {w.status === 'PENDING' ? (
-                                <>
+                                <div className="flex items-center justify-end gap-1.5">
                                   <button
-                                    onClick={() => handleUpdateWithdrawalStatus(w.id, 'COMPLETED')}
-                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[11px] transition shadow-xs cursor-pointer"
-                                    title="Marcar como enviado via M-Pesa/e-Mola"
+                                    onClick={() => handleCloseWithdrawal(w)}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/30 cursor-pointer flex items-center gap-1"
+                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Fechar"
                                   >
-                                    Concluir
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Fechar</span>
                                   </button>
                                   <button
-                                    onClick={() => handleUpdateWithdrawalStatus(w.id, 'REJECTED')}
-                                    className="px-2.5 py-1 bg-slate-800 hover:bg-rose-900 text-rose-300 font-bold rounded-lg text-[11px] transition cursor-pointer"
-                                    title="Cancelar pedido"
+                                    onClick={() => handleRejectWithdrawal(w)}
+                                    className="px-2 py-1.5 bg-slate-800 hover:bg-rose-900 text-rose-300 font-bold rounded-xl text-[11px] transition cursor-pointer"
+                                    title="Rejeitar e estornar saldo total ao cliente"
                                   >
                                     Rejeitar
                                   </button>
-                                </>
+                                </div>
                               ) : (
-                                <span className="text-[10px] font-mono text-slate-500">
-                                  Processado
-                                </span>
+                                <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400">
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Fechado</span>
+                                </div>
                               )}
                             </td>
                           </tr>

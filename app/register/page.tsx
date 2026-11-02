@@ -31,15 +31,35 @@ export default function RegisterPage() {
   const [idade, setIdade] = useState<number | ''>('');
   const [provincia, setProvincia] = useState<string>('Maputo Cidade');
   
-  // Capturar ?ref= da URL (para convites de 5%) de forma segura
-  const [refCode] = useState<string>(() => {
+  // Capturar ?ref= da URL (para convites de 5%) de forma confiável no client-side
+  const [refCode, setRefCode] = useState<string>('');
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const ref = params.get('ref');
-      return ref ? ref.trim().toUpperCase() : '';
+      const ref = params.get('ref') || params.get('r') || params.get('convite');
+      if (ref) {
+        const clean = ref.trim().toUpperCase();
+        timeoutId = setTimeout(() => {
+          setRefCode(clean);
+        }, 0);
+        try {
+          localStorage.setItem('taprise_ref', clean);
+        } catch {}
+      } else {
+        try {
+          const saved = localStorage.getItem('taprise_ref');
+          if (saved) {
+            timeoutId = setTimeout(() => {
+              setRefCode(saved.trim().toUpperCase());
+            }, 0);
+          }
+        } catch {}
+      }
     }
-    return '';
-  });
+    return () => clearTimeout(timeoutId);
+  }, []);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -94,6 +114,9 @@ export default function RegisterPage() {
     if (!result.success) {
       setErrorMessage(result.error || 'Falha ao processar o registo da conta.');
     } else {
+      try {
+        localStorage.removeItem('taprise_ref');
+      } catch {}
       setIsSuccess(true);
       setTimeout(() => {
         router.push('/');

@@ -6,6 +6,8 @@ import {
   CheckCircle,
   AlertTriangle,
   RefreshCw,
+  TrendingDown,
+  TrendingUp,
   X
 } from 'lucide-react';
 import {
@@ -95,6 +97,8 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
 
   // Estados de Execução da Ordem
   const [isProcessingOrder, setIsProcessingOrder] = useState<boolean>(false);
+  const [processingCountdown, setProcessingCountdown] = useState<number>(8);
+  const [processingSide, setProcessingSide] = useState<'buy' | 'sell'>('buy');
   const [orderModalResult, setOrderModalResult] = useState<{
     open: boolean;
     evaluation: OrderExecutionEvaluation | null;
@@ -183,7 +187,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   const userClaimedToday = userProfile?.lastClaimDate === todayMaputoStr;
   const isWindowActive = maputoTime.isInWindow || dailyConfig.forceOpen;
 
-  // Executar Ordem de Compra ou Venda
+  // Executar Ordem de Compra ou Venda (Processamento realista de 8 segundos)
   const handleExecuteOrder = async (action: 'buy' | 'sell') => {
     if (!user) {
       alert('Por favor, inicie sessão na sua conta para negociar.');
@@ -215,7 +219,15 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
 
     try {
       setIsProcessingOrder(true);
-      await new Promise((r) => setTimeout(r, 700));
+      setProcessingSide(action);
+      setProcessingCountdown(8);
+
+      // Contagem decrescente realista de 8 segundos antes de liquidar a ordem
+      for (let sec = 8; sec > 0; sec--) {
+        setProcessingCountdown(sec);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      setProcessingCountdown(0);
 
       const finalBalance = evaluation.newBalance;
       const userRef = doc(db, 'users', user.uid);
@@ -276,6 +288,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
       alert(`Falha na ordem: ${err.message || 'Erro de conexão'}`);
     } finally {
       setIsProcessingOrder(false);
+      setProcessingCountdown(8);
     }
   };
 
@@ -547,10 +560,13 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
           type="button"
           onClick={() => handleExecuteOrder('buy')}
           disabled={isProcessingOrder}
-          className="w-full py-4 px-4 rounded-xl font-black text-base sm:text-lg tracking-wider transition-all duration-150 cursor-pointer text-center bg-red-600 hover:bg-red-500 active:scale-98 text-white shadow-lg shadow-red-600/30 disabled:opacity-50"
+          className="w-full py-4 px-4 rounded-xl font-black text-base sm:text-lg tracking-wider transition-all duration-150 cursor-pointer text-center bg-red-600 hover:bg-red-500 active:scale-98 text-white shadow-lg shadow-red-600/30 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isProcessingOrder ? (
-            <RefreshCw className="w-5 h-5 animate-spin mx-auto" />
+          {isProcessingOrder && processingSide === 'buy' ? (
+            <span className="flex items-center justify-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>{processingCountdown}s</span>
+            </span>
           ) : (
             'Comprar'
           )}
@@ -561,10 +577,13 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
           type="button"
           onClick={() => handleExecuteOrder('sell')}
           disabled={isProcessingOrder}
-          className="w-full py-4 px-4 rounded-xl font-black text-base sm:text-lg tracking-wider transition-all duration-150 cursor-pointer text-center bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50"
+          className="w-full py-4 px-4 rounded-xl font-black text-base sm:text-lg tracking-wider transition-all duration-150 cursor-pointer text-center bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white shadow-lg shadow-emerald-600/30 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isProcessingOrder ? (
-            <RefreshCw className="w-5 h-5 animate-spin mx-auto" />
+          {isProcessingOrder && processingSide === 'sell' ? (
+            <span className="flex items-center justify-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>{processingCountdown}s</span>
+            </span>
           ) : (
             'Vender'
           )}
@@ -572,35 +591,50 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
 
       </div>
 
+      {/* Barra de Status de Processamento da Ordem (8s) */}
+      {isProcessingOrder && (
+        <div className="mt-3 p-3 bg-slate-900/90 border border-slate-700/80 rounded-xl flex items-center justify-between text-xs animate-pulse">
+          <div className="flex items-center gap-2 text-slate-200">
+            <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+            <span className="font-bold">
+              Executando Ordem de {processingSide === 'buy' ? 'COMPRA' : 'VENDA'} na Bolsa...
+            </span>
+          </div>
+          <span className="font-mono font-black text-amber-300 bg-slate-950 px-2.5 py-0.5 rounded border border-slate-800">
+            {processingCountdown}s
+          </span>
+        </div>
+      )}
+
       {/* ======================================================== */}
-      {/* MODAL DE RESULTADO DA ORDEM */}
+      {/* MODAL DE RESULTADO DA ORDEM (LIMPO, PROFISSIONAL, SEM TEXTOS EXPLICATIVOS) */}
       {/* ======================================================== */}
       {orderModalResult.open && orderModalResult.evaluation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 max-w-sm w-full relative shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6 max-w-sm w-full relative shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
             
             <button
               type="button"
               onClick={() => setOrderModalResult({ open: false, evaluation: null, action: 'buy', ticket: '' })}
-              className="absolute top-3 right-3 p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800/80 cursor-pointer"
+              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800/80 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
             <div className="text-center space-y-2 mt-1">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto ${
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-lg ${
                 orderModalResult.evaluation.won
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                   : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
               }`}>
                 {orderModalResult.evaluation.won ? (
-                  <CheckCircle className="w-6 h-6" />
+                  <CheckCircle className="w-7 h-7" />
                 ) : (
-                  <AlertTriangle className="w-6 h-6" />
+                  <TrendingDown className="w-7 h-7" />
                 )}
               </div>
 
-              <h3 className="text-base font-black text-white">
+              <h3 className="text-lg font-black text-white">
                 {orderModalResult.evaluation.won ? 'Ordem Concluída' : 'Ordem Encerrada'}
               </h3>
               
@@ -609,38 +643,41 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
               </p>
             </div>
 
-            <div className="mt-4 bg-slate-950 p-3 rounded-xl border border-slate-900 space-y-2 text-xs font-mono">
-              <div className="flex justify-between text-slate-400">
-                <span>Ordem:</span>
-                <span className="font-bold text-white uppercase">{orderModalResult.action === 'buy' ? 'Compra' : 'Venda'}</span>
+            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-900 space-y-2.5 text-xs font-mono">
+              <div className="flex justify-between items-center text-slate-400">
+                <span className="font-sans font-medium">Tipo de Ordem:</span>
+                <span className={`px-2.5 py-0.5 rounded font-bold font-sans text-xs ${
+                  orderModalResult.action === 'buy'
+                    ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {orderModalResult.action === 'buy' ? 'COMPRA' : 'VENDA'}
+                </span>
               </div>
 
-              {orderModalResult.evaluation.won ? (
-                <div className="flex justify-between text-emerald-400 font-bold">
-                  <span>Resultado (+4,73%):</span>
-                  <span>+{orderModalResult.evaluation.gain.toFixed(2)} MT</span>
-                </div>
-              ) : orderModalResult.evaluation.loss > 0 ? (
-                <div className="flex justify-between text-rose-400 font-bold">
-                  <span>Resultado:</span>
-                  <span>-{orderModalResult.evaluation.loss.toFixed(2)} MT</span>
-                </div>
-              ) : null}
+              <div className="flex justify-between items-center pt-2 border-t border-slate-900">
+                <span className="font-sans font-medium text-slate-400">Resultado:</span>
+                <span className={`text-sm font-black font-mono ${
+                  orderModalResult.evaluation.won ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
+                  {orderModalResult.evaluation.won
+                    ? `+${orderModalResult.evaluation.gain.toFixed(2)} MT`
+                    : `-${orderModalResult.evaluation.loss.toFixed(2)} MT`}
+                </span>
+              </div>
 
-              <div className="flex justify-between pt-1.5 border-t border-slate-900 text-white font-bold">
-                <span>Novo Saldo:</span>
-                <span>{orderModalResult.evaluation.newBalance.toFixed(2)} MT</span>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-900 text-white font-bold">
+                <span className="font-sans font-medium text-slate-300">Novo Saldo:</span>
+                <span className="text-sm font-black font-mono text-white">
+                  {orderModalResult.evaluation.newBalance.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                </span>
               </div>
             </div>
-
-            <p className="mt-3 text-xs text-slate-400 leading-snug text-center">
-              {orderModalResult.evaluation.reasonText}
-            </p>
 
             <button
               type="button"
               onClick={() => setOrderModalResult({ open: false, evaluation: null, action: 'buy', ticket: '' })}
-              className="w-full mt-4 py-2.5 rounded-xl font-bold text-xs uppercase bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
+              className="w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-white cursor-pointer transition shadow-md"
             >
               OK
             </button>

@@ -822,7 +822,7 @@ export default function Home() {
   const [withdrawalMethod, setWithdrawalMethod] = useState<'mpesa' | 'emola'>('mpesa');
   const [withdrawalPhone, setWithdrawalPhone] = useState<string>('');
   const [withdrawalName, setWithdrawalName] = useState<string>('');
-  const [withdrawalAmount, setWithdrawalAmount] = useState<string>('1000');
+  const [withdrawalAmount, setWithdrawalAmount] = useState<string>('300');
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState<boolean>(false);
   const [withdrawalSuccessData, setWithdrawalSuccessData] = useState<{
     id: string;
@@ -841,18 +841,18 @@ export default function Home() {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
-  // Código de Convite Garantido e Instantâneo (Bug 1 Fix - Zero Loading)
+  // Código de Convite Garantido e Instantâneo
   const fallbackCode = user ? (user.uid.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'TRBONUS5') : 'TRBONUS5';
   const displayInviteCode = userProfile?.inviteCode || fallbackCode;
 
   // Se o usuário existir e ainda não tiver inviteCode no Firestore, salva em background
   useEffect(() => {
     if (user && !userProfile?.inviteCode) {
-      const genCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const codeToSave = fallbackCode;
       const userRef = doc(db, 'users', user.uid);
-      setDoc(userRef, { inviteCode: genCode }, { merge: true }).catch(() => {});
+      setDoc(userRef, { inviteCode: codeToSave }, { merge: true }).catch(() => {});
     }
-  }, [user, userProfile?.inviteCode]);
+  }, [user, userProfile?.inviteCode, fallbackCode]);
 
   // Route Protection: Redirect to /login if user is not authenticated
   useEffect(() => {
@@ -1169,10 +1169,13 @@ export default function Home() {
   // ------------------------------------------
   // CARTEIRA & REGRAS DE RETIRADA
   // ------------------------------------------
+  // ------------------------------------------
+  // CARTEIRA & REGRAS DE RETIRADA
+  // ------------------------------------------
   // Reserva mínima que SEMPRE deve sobrar na conta: 1.000,00 MT
   const reserveAmount = 1000.00;
-  // Saldo passível de levantamento
-  const withdrawableBalance = Math.max(0, balance - reserveAmount);
+  // Saldo passível de levantamento considerando taxa de 5%: V * 1.05 <= balance - 1000
+  const withdrawableBalance = Math.max(0, Math.floor(((balance - reserveAmount) / 1.05) * 100) / 100);
 
   // Valor total alocado em posições ativas
   const positionsAllocatedMargin = useMemo(() => {
@@ -1197,27 +1200,35 @@ export default function Home() {
       return;
     }
 
-    // 2. Validar Montante
+    // 2. Validar Montante (Mínimo de 300,00 MT)
     const numAmount = parseFloat(withdrawalAmount);
-    if (isNaN(numAmount) || numAmount < 1000) {
-      showToast('O valor mínimo de levantamento é de 1.000,00 MT.', 'error');
+    if (isNaN(numAmount) || numAmount < 300) {
+      showToast('O valor mínimo de levantamento é de 300,00 MT.', 'error');
       return;
     }
 
-    // 3. Validar Reserva Obrigatória de 1.000 MT: sempre deve sobrar 1000mt na conta
-    if (balance - numAmount < 1000) {
-      showToast('Regra TapRise: Deve sempre sobrar uma reserva de pelo menos 1.000,00 MT na sua conta (necessita de pelo menos 2.000,00 MT de saldo total para levantar 1.000,00 MT).', 'error');
+    // 3. Taxa de 5% sobre o valor levantado (cortada do saldo que sobra na conta)
+    const fee = Math.round(numAmount * 0.05 * 100) / 100;
+    const totalDebitado = Number((numAmount + fee).toFixed(2));
+    const saldoRestante = Number((balance - totalDebitado).toFixed(2));
+
+    // 4. Validar Reserva Obrigatória de 1.000 MT: sempre deve sobrar 1000 MT na conta
+    if (saldoRestante < 1000) {
+      showToast(
+        `Regra TapRise: O levantamento foi recusado porque deve sempre sobrar no mínimo 1.000,00 MT na conta após o levantamento e a taxa de 5% (${fee.toFixed(2)} MT). Com o saldo atual de ${balance.toFixed(2)} MT, restariam apenas ${saldoRestante.toFixed(2)} MT.`,
+        'error'
+      );
       return;
     }
 
-    // 4. Validar Nome Completo do Titular
+    // 5. Validar Nome Completo do Titular
     const cleanName = withdrawalName.trim();
     if (!cleanName || cleanName.length < 3) {
       showToast('Por favor, informe o seu nome completo de confirmação do titular da conta.', 'error');
       return;
     }
 
-    // 5. Validar Número de Telefone (M-Pesa 84/85 ou e-Mola 86/87)
+    // 6. Validar Número de Telefone (M-Pesa 84/85 ou e-Mola 86/87)
     const cleanPhone = withdrawalPhone.replace(/\D/g, '');
     if (withdrawalMethod === 'mpesa') {
       if (cleanPhone.length !== 9 || (!cleanPhone.startsWith('84') && !cleanPhone.startsWith('85'))) {
@@ -1235,7 +1246,7 @@ export default function Home() {
 
     try {
       setWithdrawalSubmitting(true);
-      const newBal = balance - numAmount;
+      const newBal = saldoRestante;
       const hoje = getMaputoTodayDate();
       const operatorLabel = withdrawalMethod === 'mpesa' ? 'M-Pesa' : 'e-Mola';
 
@@ -1248,6 +1259,14 @@ export default function Home() {
         atualizadoEm: serverTimestamp()
       });
 
+      // Sincronizar também usuarios/{uid}
+      try {
+        await updateDoc(doc(db, 'usuarios', user.uid), {
+          saldoDisponivel: newBal,
+          saldoTotal: newBal + unrealizedPnL
+        });
+      } catch {}
+
       // B. Registar pedido na coleção 'withdrawals'
       const withdrawalDocRef = await addDoc(collection(db, 'withdrawals'), {
         uid: user.uid,
@@ -1256,12 +1275,14 @@ export default function Home() {
         operator: operatorLabel,
         phoneNumber: cleanPhone,
         amount: numAmount,
+        fee: fee,
+        totalDebited: totalDebitado,
+        remainingBalance: saldoRestante,
         status: 'PENDING',
         processingTime: '2 a 3 horas',
         statusMessage: 'Aguarde entre 2 a 3 horas para a validação bancária e envio dos fundos.',
         requestedAt: serverTimestamp(),
         dateStr: hoje,
-        fee: 0.00
       });
 
       // C. Registar na coleção 'transactions'
@@ -1271,7 +1292,9 @@ export default function Home() {
         userEmail: user.email || '',
         userName: cleanName,
         type: 'withdrawal',
-        amount: -numAmount,
+        amount: -totalDebitado,
+        netAmount: numAmount,
+        fee: fee,
         operator: operatorLabel,
         targetPhone: cleanPhone,
         status: 'PENDING',
@@ -1279,7 +1302,7 @@ export default function Home() {
         newBalance: newBal,
         date: hoje,
         timestamp: serverTimestamp(),
-        description: `Pedido de Levantamento via ${operatorLabel} (${cleanPhone}): -${numAmount.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT (Tempo de espera: 2 a 3 horas)`
+        description: `Pedido de Levantamento via ${operatorLabel} (${cleanPhone}): ${numAmount.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT (Taxa 5%: ${fee.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT | Total cortado: ${totalDebitado.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT)`
       });
 
       // D. Atualizar saldo local
@@ -1296,7 +1319,7 @@ export default function Home() {
       });
 
       setIsWithdrawalModalOpen(false);
-      showToast(`Pedido de ${formatMT(numAmount)} submetido com sucesso! Aguarde entre 2 a 3 horas.`, 'success');
+      showToast(`Pedido de ${formatMT(numAmount)} submetido com sucesso! Taxa de 5% (${formatMT(fee)}) aplicada. Aguarde entre 2 a 3 horas.`, 'success');
     } catch (err: any) {
       console.error('Erro ao processar levantamento:', err);
       showToast(`Falha ao submeter pedido: ${err.message || 'Tente novamente.'}`, 'error');
@@ -2907,7 +2930,7 @@ export default function Home() {
                         Levantamento Direto para o seu Telemóvel
                       </h3>
                       <p className="text-xs text-slate-300 leading-relaxed">
-                        Retire o seu saldo disponível a partir de <strong>1.000,00 MT</strong>. Após submeter, os fundos são processados entre <strong>2 a 3 horas</strong>. Os levantamentos funcionam diariamente das <strong>08:00 às 12:00</strong> (Horário de Maputo).
+                        Retire o seu saldo disponível a partir de <strong>300,00 MT</strong>. Taxa operacional de <strong>5%</strong> sobre o valor levantado (debitada do saldo remanescente). Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
                       </p>
                     </div>
 
@@ -2920,7 +2943,7 @@ export default function Home() {
                         <span>Novo Levantamento</span>
                       </button>
                       <span className="text-[10px] text-slate-400 text-center">
-                        Taxa de processamento: 0,00 MT
+                        Taxa operacional: 5% • Mínimo: 300 MT
                       </span>
                     </div>
                   </div>
@@ -3788,15 +3811,15 @@ export default function Home() {
                     4. Montante a Levantar (MT)
                   </label>
                   <span className="text-[11px] text-slate-500">
-                    Mínimo: <strong className="text-slate-800">1.000,00 MT</strong>
+                    Mínimo: <strong className="text-slate-800">300,00 MT</strong>
                   </span>
                 </div>
                 <div className="relative">
                   <input
                     type="number"
-                    step="100"
-                    min="1000"
-                    placeholder="1000"
+                    step="50"
+                    min="300"
+                    placeholder="300"
                     value={withdrawalAmount}
                     onChange={(e) => setWithdrawalAmount(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
@@ -3808,7 +3831,7 @@ export default function Home() {
 
                 {/* Chips de Valor Rápido */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {[1000, 2500, 5000].map((preset) => (
+                  {[300, 500, 1000, 2500].map((preset) => (
                     <button
                       key={preset}
                       type="button"
@@ -3818,7 +3841,7 @@ export default function Home() {
                       +{preset.toLocaleString('pt-MZ')} MT
                     </button>
                   ))}
-                  {withdrawableBalance >= 1000 && (
+                  {withdrawableBalance >= 300 && (
                     <button
                       type="button"
                       onClick={() => setWithdrawalAmount(withdrawableBalance.toString())}
@@ -3830,45 +3853,59 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Detalhes Financeiros e Cálculo de Reserva */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2 text-xs">
-                <div className="flex justify-between text-slate-500">
-                  <span>Saldo Atual:</span>
-                  <span className="font-mono font-bold text-slate-800">{formatMT(balance)}</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Valor do Levantamento:</span>
-                  <span className="font-mono font-bold text-blue-600">
-                    -{formatMT(parseFloat(withdrawalAmount) || 0)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Taxa de Processamento:</span>
-                  <span className="font-mono font-bold text-emerald-600">0,00 MT (Isento)</span>
-                </div>
-                <div className="h-px bg-slate-200 my-1"></div>
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold text-slate-700">Saldo Remanescente em Conta:</span>
-                  <span className={`font-mono font-black ${
-                    balance - (parseFloat(withdrawalAmount) || 0) >= 1000
-                      ? 'text-emerald-600'
-                      : 'text-rose-600'
-                  }`}>
-                    {formatMT(balance - (parseFloat(withdrawalAmount) || 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-[11px]">
-                  <span className="text-slate-400">Reserva Mínima Obrigatória:</span>
-                  <span className="font-mono font-bold text-amber-700">1.000,00 MT</span>
-                </div>
+              {/* Detalhes Financeiros e Cálculo de Reserva (Taxa de 5% sobre o valor levantado cortada do saldo restante) */}
+              {(() => {
+                const amt = parseFloat(withdrawalAmount) || 0;
+                const feeAmt = Math.round(amt * 0.05 * 100) / 100;
+                const debAmt = amt + feeAmt;
+                const remBal = balance - debAmt;
+                const isShort = remBal < 1000;
 
-                {balance - (parseFloat(withdrawalAmount) || 0) < 1000 && (
-                  <div className="p-2 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 font-semibold flex items-center gap-1.5 mt-1">
-                    <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span>Atenção: Deve sempre sobrar pelo menos 1.000,00 MT na sua conta após a retirada.</span>
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2 text-xs">
+                    <div className="flex justify-between text-slate-500">
+                      <span>Saldo Atual:</span>
+                      <span className="font-mono font-bold text-slate-800">{formatMT(balance)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Valor do Levantamento (a receber):</span>
+                      <span className="font-mono font-bold text-blue-600">
+                        {formatMT(amt)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Taxa Operacional (5% cortada do saldo):</span>
+                      <span className="font-mono font-bold text-amber-600">
+                        +{formatMT(feeAmt)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-semibold text-slate-700">
+                      <span>Total Cortado da Conta:</span>
+                      <span className="font-mono font-bold text-rose-600">
+                        -{formatMT(debAmt)}
+                      </span>
+                    </div>
+                    <div className="h-px bg-slate-200 my-1"></div>
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-slate-700">Saldo que Sobra na Conta:</span>
+                      <span className={`font-mono font-black ${!isShort ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {formatMT(remBal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-slate-400">Reserva Mínima Obrigatória:</span>
+                      <span className="font-mono font-bold text-amber-700">1.000,00 MT</span>
+                    </div>
+
+                    {isShort && (
+                      <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 font-semibold flex items-start gap-1.5 mt-1">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                        <span>Atenção: O levantamento será recusado porque devem sempre sobrar pelo menos 1.000,00 MT na conta após o valor e a taxa de 5%.</span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
               {/* Destaque de Espera 2 a 3 horas */}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-900 flex items-center gap-2">
@@ -3892,8 +3929,8 @@ export default function Home() {
                   disabled={
                     withdrawalSubmitting ||
                     !withdrawalWindow.isOpen ||
-                    parseFloat(withdrawalAmount) < 1000 ||
-                    balance - (parseFloat(withdrawalAmount) || 0) < 1000 ||
+                    parseFloat(withdrawalAmount) < 300 ||
+                    balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ||
                     withdrawalPhone.length !== 9 ||
                     !withdrawalName.trim()
                   }
@@ -3906,8 +3943,8 @@ export default function Home() {
                     </>
                   ) : !withdrawalWindow.isOpen ? (
                     <span>Janela Fechada (Abre 08h)</span>
-                  ) : balance - (parseFloat(withdrawalAmount) || 0) < 1000 ? (
-                    <span>Reserva Insuficiente</span>
+                  ) : balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ? (
+                    <span>Reserva Insuficiente (&lt; 1.000 MT)</span>
                   ) : (
                     <span>Confirmar Levantamento</span>
                   )}

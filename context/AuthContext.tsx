@@ -361,7 +361,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (refCode && typeof refCode === 'string') {
         const cleanRef = refCode.trim().toUpperCase();
+        invitedByCode = cleanRef;
         try {
+          // A. Procurar por inviteCode exato na coleção users
           const q = query(collection(db, 'users'), where('inviteCode', '==', cleanRef), limit(1));
           const refSnap = await getDocs(q);
           if (!refSnap.empty) {
@@ -370,12 +372,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Não permitir auto-convite
             if (referrerDoc.id !== newUser.uid && referrerData.email?.toLowerCase() !== email.trim().toLowerCase()) {
               invitedBy = referrerDoc.id;
-              invitedByCode = cleanRef;
-              // Incrementar contagem de indicados no indicador
-              updateDoc(doc(db, 'users', referrerDoc.id), {
-                indicadosCount: increment(1)
-              }).catch(() => {});
             }
+          } else {
+            // B. Se não encontrou por inviteCode, procurar por UID direto ou prefixo de UID
+            const allUsersSnap = await getDocs(collection(db, 'users'));
+            allUsersSnap.forEach((docSnap) => {
+              if (invitedBy) return;
+              const uData = docSnap.data();
+              const uCode = (uData.inviteCode || '').toUpperCase();
+              const uidUpper = docSnap.id.toUpperCase();
+              const cleanUid = docSnap.id.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+              if (
+                docSnap.id !== newUser.uid &&
+                (uCode === cleanRef ||
+                  uidUpper.startsWith(cleanRef) ||
+                  cleanUid.startsWith(cleanRef) ||
+                  docSnap.id === refCode.trim())
+              ) {
+                invitedBy = docSnap.id;
+              }
+            });
+          }
+
+          // Se encontrou o indicador, incrementar contagem de indicados
+          if (invitedBy) {
+            updateDoc(doc(db, 'users', invitedBy), {
+              indicadosCount: increment(1)
+            }).catch(() => {});
           }
         } catch (refErr) {
           console.warn('Erro ao processar referência de convite:', refErr);
@@ -392,8 +415,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         balance: 0.0,
         patrimonioTotal: 0.0,
         inviteCode: myInviteCode,
-        invitedBy: invitedBy || undefined,
-        invitedByCode: invitedByCode || undefined,
+        invitedBy: invitedBy || '',
+        invitedByCode: invitedByCode || '',
         commissionPaid: false,
         totalComissoes: 0,
         indicadosCount: 0
@@ -411,6 +434,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         criadoEm: serverTimestamp(),
         atualizadoEm: serverTimestamp()
       });
+
+      // Sincronizar também com usuarios/{uid}
+      try {
+        await setDoc(doc(db, 'usuarios', newUser.uid), {
+          nome: initialProfile.nome,
+          email: initialProfile.email,
+          provincia: initialProfile.provincia,
+          idade: initialProfile.idade,
+          saldoDisponivel: 0.0,
+          saldoTotal: 0.0,
+          inviteCode: myInviteCode,
+          invitedBy: invitedBy || '',
+          invitedByCode: invitedByCode || '',
+          commissionPaid: false,
+          criadoEm: serverTimestamp()
+        }, { merge: true });
+      } catch {}
 
       setLoading(false);
       return { success: true };
