@@ -16,6 +16,7 @@ import {
   Search,
   RefreshCw,
   ArrowUpRight,
+  ArrowRight,
   ArrowLeft,
   DollarSign,
   TrendingUp,
@@ -41,7 +42,10 @@ import {
   Trash2,
   ExternalLink,
   BookOpen,
-  CreditCard
+  CreditCard,
+  ShieldCheck,
+  CheckCircle2,
+  Megaphone
 } from 'lucide-react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
 import { getMaputoTodayDate, getMaputoTimeDetails, evaluate21hOrder, MaputoTimeDetails } from '@/lib/maputoTime';
@@ -186,7 +190,7 @@ export default function AdminPage() {
   const { user, loading: authLoading } = useAuth();
 
   // REGRA 1 - ACESSO EXCLUSIVO:
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const isAdmin = Boolean(user?.email && user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim());
 
   // Active Tab: 1 - Visão Geral, 2 - Usuários, 3 - Levantamentos, 4 - Jogo 21h, 5 - Mercado, 6 - Comunicados, 7 - Dica do Instrutor, 8 - Chat Global
   const [activeTab, setActiveTab] = useState<'visao-geral' | 'usuarios' | 'levantamentos' | 'jogo-21h' | 'mercado' | 'comunicados' | 'dica-instrutor' | 'chat'>('visao-geral');
@@ -232,7 +236,17 @@ export default function AdminPage() {
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [userSearch, setUserSearch] = useState<string>('');
   const [filterZeroBalance, setFilterZeroBalance] = useState<boolean>(false);
-  const [adminWithdrawals, setAdminWithdrawals] = useState<WithdrawalAdminRecord[]>([]);
+  const [adminWithdrawals, setAdminWithdrawals] = useState<WithdrawalAdminRecord[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('taprise_offline_admin_withdrawals');
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return [];
+  });
+  const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
+  const [isProcessingWithdrawal, setIsProcessingWithdrawal] = useState<string | null>(null);
 
   // Stats
   const [ordersTodayCount, setOrdersTodayCount] = useState<number>(0);
@@ -405,13 +419,16 @@ export default function AdminPage() {
 
   // Announcement state
   const [announcement, setAnnouncement] = useState<AnnouncementConfig>({
-    active: false,
+    active: true,
     title: 'Aviso da Mesa de Operações TapRise',
     message: 'Horário oficial de cotações ativo. Consulte as regras institucionais.',
     type: 'info',
     author: 'Administração TapRise'
   });
   const [isSavingAnnouncement, setIsSavingAnnouncement] = useState<boolean>(false);
+  const [broadcastToGroup, setBroadcastToGroup] = useState<boolean>(true);
+  const [pinInGroupChat, setPinInGroupChat] = useState<boolean>(true);
+  const [announcementPreviewTab, setAnnouncementPreviewTab] = useState<'group' | 'banner'>('group');
 
   // Toast
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -615,18 +632,52 @@ export default function AdminPage() {
 
     // 7. Ouvir Pedidos de Levantamento (M-Pesa / e-Mola) em tempo real
     const withdrawalsRef = collection(db, 'withdrawals');
+
+    // Carregamento inicial imediato via getDocs
+    getDocs(withdrawalsRef).then((snap) => {
+      const list: WithdrawalAdminRecord[] = [];
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as WithdrawalAdminRecord);
+      });
+      list.sort((a, b) => {
+        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.requestedAt?.seconds ? a.requestedAt.seconds * 1000 : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0));
+        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.requestedAt?.seconds ? b.requestedAt.seconds * 1000 : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0));
+        return tB - tA;
+      });
+      if (list.length > 0) {
+        setAdminWithdrawals(list);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('taprise_offline_admin_withdrawals', JSON.stringify(list));
+          } catch {}
+        }
+      }
+    }).catch((e) => console.warn('Erro getDocs inicial levantamentos:', e));
+
     const unsubscribeWithdrawals = onSnapshot(withdrawalsRef, (snap) => {
       const list: WithdrawalAdminRecord[] = [];
       snap.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as WithdrawalAdminRecord);
       });
       list.sort((a, b) => {
-        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.requestedAt?.seconds ? a.requestedAt.seconds * 1000 : 0);
-        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.requestedAt?.seconds ? b.requestedAt.seconds * 1000 : 0);
+        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.requestedAt?.seconds ? a.requestedAt.seconds * 1000 : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0));
+        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.requestedAt?.seconds ? b.requestedAt.seconds * 1000 : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0));
         return tB - tA;
       });
       setAdminWithdrawals(list);
-    }, (e) => console.warn('Erro ao carregar levantamentos admin:', e));
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('taprise_offline_admin_withdrawals', JSON.stringify(list));
+        } catch {}
+      }
+    }, (e) => {
+      console.warn('Erro ao carregar levantamentos admin no onSnapshot:', e);
+      getDocs(withdrawalsRef).then((snap) => {
+        const list: WithdrawalAdminRecord[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() } as WithdrawalAdminRecord));
+        setAdminWithdrawals(list);
+      }).catch(() => {});
+    });
 
     // 8. Ouvir Mensagens do Chat Global em tempo real (taprise_group_messages)
     const chatRef = collection(db, 'taprise_group_messages');
@@ -714,21 +765,71 @@ export default function AdminPage() {
   const zeroBalanceCount = useMemo(() => {
     return usersList.filter((u) => (u.balance || u.saldoVirtual || 0) <= 0).length;
   }, [usersList]);
+  const isWithdrawalPending = (status?: string) => {
+    const s = (status || '').toLowerCase().trim();
+    return s === 'pending' || s === 'pendente' || s === 'aguardando' || s === '';
+  };
+  const isWithdrawalAccepted = (status?: string) => {
+    const s = (status || '').toLowerCase().trim();
+    return s === 'aceito' || s === 'completed' || s === 'fechado' || s === 'aprovado';
+  };
+  const isWithdrawalRejected = (status?: string) => {
+    const s = (status || '').toLowerCase().trim();
+    return s === 'rejeitado' || s === 'rejected';
+  };
+
   const pendingWithdrawalsCount = useMemo(() => {
-    return adminWithdrawals.filter((w) => w.status === 'PENDING').length;
+    return adminWithdrawals.filter((w) => isWithdrawalPending(w.status)).length;
   }, [adminWithdrawals]);
 
-  // Ação Admin: Fechar / Concluir Levantamento (após transferência via M-Pesa / e-Mola)
-  const handleCloseWithdrawal = async (w: WithdrawalAdminRecord) => {
+  const acceptedWithdrawalsCount = useMemo(() => {
+    return adminWithdrawals.filter((w) => isWithdrawalAccepted(w.status)).length;
+  }, [adminWithdrawals]);
+
+  const rejectedWithdrawalsCount = useMemo(() => {
+    return adminWithdrawals.filter((w) => isWithdrawalRejected(w.status)).length;
+  }, [adminWithdrawals]);
+
+  const filteredAdminWithdrawals = useMemo(() => {
+    if (withdrawalFilter === 'pending') {
+      return adminWithdrawals.filter((w) => isWithdrawalPending(w.status));
+    }
+    if (withdrawalFilter === 'accepted') {
+      return adminWithdrawals.filter((w) => isWithdrawalAccepted(w.status));
+    }
+    if (withdrawalFilter === 'rejected') {
+      return adminWithdrawals.filter((w) => isWithdrawalRejected(w.status));
+    }
+    return adminWithdrawals;
+  }, [adminWithdrawals, withdrawalFilter]);
+
+  // Ação Admin: Aceitar / Fechar Levantamento (após transferência via M-Pesa / e-Mola)
+  const handleAcceptWithdrawal = async (w: WithdrawalAdminRecord) => {
     try {
+      setIsProcessingWithdrawal(w.id);
       const wRef = doc(db, 'withdrawals', w.id);
       await updateDoc(wRef, {
-        status: 'COMPLETED',
+        status: 'aceito',
+        statusNormalized: 'COMPLETED',
         statusMessage: 'Transferência efetuada com sucesso pelo Administrador via carteira móvel.',
         processedAt: serverTimestamp(),
         processedBy: user?.email || ADMIN_EMAIL,
         fechadoEm: serverTimestamp()
       });
+
+      // Atualizar lista local imediatamente para feedback instantâneo
+      setAdminWithdrawals((prev) =>
+        prev.map((item) =>
+          item.id === w.id
+            ? {
+                ...item,
+                status: 'aceito',
+                statusNormalized: 'COMPLETED',
+                statusMessage: 'Transferência efetuada com sucesso pelo Administrador via carteira móvel.'
+              }
+            : item
+        )
+      );
 
       // Registar confirmação na coleção 'transactions'
       if (w.uid) {
@@ -737,34 +838,54 @@ export default function AdminPage() {
           userId: w.uid,
           userEmail: w.userEmail || '',
           userName: w.userName || 'Investidor',
-          type: 'withdrawal_closed',
+          type: 'withdrawal_accepted',
           amount: w.amount || 0,
-          status: 'COMPLETED',
+          status: 'aceito',
           adminEmail: user?.email || ADMIN_EMAIL,
           timestamp: serverTimestamp(),
-          description: `Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT via ${w.operator || 'Móvel'} (${w.phoneNumber || ''}) FECHADO e concluído com sucesso.`
+          description: `Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT via ${w.operator || 'Móvel'} (${w.phoneNumber || ''}) ACEITO e concluído com sucesso.`
         });
       }
 
       showToast(
-        `✓ Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT para ${w.userName || 'o investidor'} foi FECHADO com sucesso!`,
+        `✓ Levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT para ${w.userName || 'o investidor'} foi ACEITO com sucesso!`,
         'success'
       );
     } catch (e: any) {
-      showToast(`Erro ao fechar pedido: ${e.message}`, 'error');
+      showToast(`Erro ao aceitar pedido: ${e.message}`, 'error');
+    } finally {
+      setIsProcessingWithdrawal(null);
     }
   };
+
+  const handleCloseWithdrawal = handleAcceptWithdrawal;
 
   // Ação Admin: Rejeitar Levantamento e Estornar Saldo Total
   const handleRejectWithdrawal = async (w: WithdrawalAdminRecord) => {
     try {
+      setIsProcessingWithdrawal(w.id);
       const wRef = doc(db, 'withdrawals', w.id);
       await updateDoc(wRef, {
-        status: 'REJECTED',
+        status: 'rejeitado',
+        statusNormalized: 'REJECTED',
         statusMessage: 'Levantamento rejeitado pela administração. Saldo total estornado.',
         processedAt: serverTimestamp(),
         processedBy: user?.email || ADMIN_EMAIL
       });
+
+      // Atualizar lista local imediatamente
+      setAdminWithdrawals((prev) =>
+        prev.map((item) =>
+          item.id === w.id
+            ? {
+                ...item,
+                status: 'rejeitado',
+                statusNormalized: 'REJECTED',
+                statusMessage: 'Levantamento rejeitado pela administração. Saldo total estornado.'
+              }
+            : item
+        )
+      );
 
       // Devolver o saldo total debitado (incluindo taxa de 5%)
       if (w.uid) {
@@ -783,6 +904,18 @@ export default function AdminPage() {
           });
         } catch {}
 
+        // Atualizar lista em memória de usuários no admin
+        setUsersList((prev) =>
+          prev.map((u) => {
+            if (u.id === w.uid) {
+              const currentBal = Number(u.balance || u.saldoVirtual || 0);
+              const newB = currentBal + refundAmount;
+              return { ...u, balance: newB, saldoVirtual: newB, saldoDisponivel: newB };
+            }
+            return u;
+          })
+        );
+
         await addDoc(collection(db, 'transactions'), {
           uid: w.uid,
           userId: w.uid,
@@ -790,15 +923,21 @@ export default function AdminPage() {
           userName: w.userName || 'Investidor',
           type: 'withdrawal_refund',
           amount: refundAmount,
-          status: 'REFUNDED',
+          status: 'rejeitado',
+          adminEmail: user?.email || ADMIN_EMAIL,
           timestamp: serverTimestamp(),
-          description: `Estorno de levantamento rejeitado: +${refundAmount.toFixed(2)} MT devolvidos à conta.`
+          description: `Pedido de levantamento de ${w.amount?.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT REJEITADO. Estorno total de ${refundAmount.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT creditado de volta à conta do investidor.`
         });
       }
 
-      showToast('Pedido rejeitado e saldo total estornado à conta do investidor.', 'info');
+      showToast(
+        `✕ Pedido de ${w.userName || 'Investidor'} foi REJEITADO e o saldo estornado com sucesso!`,
+        'success'
+      );
     } catch (e: any) {
       showToast(`Erro ao rejeitar pedido: ${e.message}`, 'error');
+    } finally {
+      setIsProcessingWithdrawal(null);
     }
   };
 
@@ -1425,10 +1564,17 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA 4: Salvar Comunicado Global
+  // AÇÃO ABA 4: Emitir Comunicado Geral (Terminal & Grupo de Chat Global)
   const handleSaveAnnouncement = async () => {
+    if (!announcement.title.trim() && !announcement.message.trim()) {
+      showToast('Por favor, preencha o título ou a mensagem do comunicado.', 'error');
+      return;
+    }
+
     try {
       setIsSavingAnnouncement(true);
+
+      // 1. Salvar no admin_config/announcement (banner superior no terminal)
       const annDocRef = doc(db, 'admin_config', 'announcement');
       await setDoc(annDocRef, {
         ...announcement,
@@ -1436,12 +1582,54 @@ export default function AdminPage() {
         updatedAt: serverTimestamp()
       });
 
+      // 2. Transmitir no Grupo de Chat Global
+      let chatMessageCreated = false;
+      const textToPublish = announcement.message.trim() || announcement.title.trim();
+      const titleToPublish = announcement.title.trim() || 'COMUNICADO OFICIAL DA ADMINISTRAÇÃO';
+
+      if (broadcastToGroup && textToPublish) {
+        const chatDocRef = await addDoc(collection(db, 'taprise_group_messages'), {
+          uid: user?.uid || 'admin',
+          displayName: 'Administração Central TapRise',
+          email: user?.email || ADMIN_EMAIL,
+          isAdmin: true,
+          type: 'announcement',
+          announcementTitle: titleToPublish,
+          title: titleToPublish,
+          announcementType: announcement.type || 'info',
+          text: textToPublish,
+          pinned: pinInGroupChat,
+          replyToId: null,
+          isDeleted: false,
+          reactions: { '👍': 1, '🚀': 1 },
+          createdAt: serverTimestamp()
+        });
+
+        chatMessageCreated = true;
+
+        // 3. Se marcado para fixar no chat
+        if (pinInGroupChat) {
+          const pinnedTextSnippet = `${titleToPublish}: ${textToPublish}`.slice(0, 140);
+          await setDoc(doc(db, 'admin_config', 'chat'), {
+            pinnedMessageId: chatDocRef.id,
+            pinnedText: pinnedTextSnippet,
+            pinnedAuthor: 'Administração TapRise',
+            pinnedAt: serverTimestamp()
+          });
+        }
+      }
+
       showToast(
-        announcement.active ? 'Aviso Global ativado e transmitido a todos os usuários!' : 'Aviso Global desativado com sucesso.',
+        announcement.active
+          ? (chatMessageCreated
+              ? '✓ Comunicado Oficial publicado com sucesso no Grupo de Chat!'
+              : '✓ Comunicado Global gravado com sucesso!')
+          : 'Comunicado desativado com sucesso.',
         'success'
       );
-    } catch (e) {
-      showToast('Erro ao salvar comunicado global.', 'error');
+    } catch (e: any) {
+      console.error('Erro ao emitir comunicado:', e);
+      showToast(`Erro ao emitir comunicado: ${e.message}`, 'error');
     } finally {
       setIsSavingAnnouncement(false);
     }
@@ -1844,6 +2032,192 @@ export default function AdminPage() {
                   >
                     ✕
                   </button>
+                </div>
+              )}
+            </div>
+
+            {/* ======================================================== */}
+            {/* MESA DE PEDIDOS DE LEVANTAMENTO (M-PESA / E-MOLA) NA VISÃO GERAL */}
+            {/* ======================================================== */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-lg shadow-blue-600/20">
+                    <Smartphone className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black text-white flex items-center gap-2">
+                      <span>Mesa de Levantamentos • M-Pesa &amp; e-Mola</span>
+                      {pendingWithdrawalsCount > 0 ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                          {pendingWithdrawalsCount} Pendente(s)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Todos Liquidados
+                        </span>
+                      )}
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Pedidos submetidos por investidores (08:00 às 12:00). Aceite ou rejeite os pedidos com 1 clique.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWithdrawalFilter('pending');
+                      setActiveTab('levantamentos');
+                    }}
+                    className="px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Ver {pendingWithdrawalsCount} Pendente(s)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWithdrawalFilter('all');
+                      setActiveTab('levantamentos');
+                    }}
+                    className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Ver Todos ({adminWithdrawals.length})</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
+                  </button>
+                </div>
+              </div>
+
+              {adminWithdrawals.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 text-xs space-y-2">
+                  <Smartphone className="w-8 h-8 mx-auto text-slate-600" />
+                  <p className="font-bold text-slate-400">Nenhum pedido de levantamento registado no Firestore</p>
+                  <p className="text-slate-600 text-[11px]">
+                    Assim que os utilizadores solicitarem retirada via M-Pesa ou e-Mola, as operações aparecerão aqui para liquidação imediata.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Data / Hora</th>
+                        <th className="py-3 px-4">Investidor &amp; Pedido</th>
+                        <th className="py-3 px-4">Operadora &amp; Telemóvel</th>
+                        <th className="py-3 px-4 text-right">Valor a Transferir</th>
+                        <th className="py-3 px-4 text-right">Taxa 5% (Debitada)</th>
+                        <th className="py-3 px-4 text-center">Estado</th>
+                        <th className="py-3 px-4 text-right">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                      {adminWithdrawals.slice(0, 6).map((w) => {
+                        let formattedDate = w.dateStr || 'Hoje';
+                        if (w.requestedAt?.toDate) {
+                          const d = w.requestedAt.toDate();
+                          formattedDate = `${d.toLocaleDateString('pt-MZ')} ${d.toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}`;
+                        }
+                        const feeValue = w.fee !== undefined ? w.fee : ((w.amount || 0) * 0.05);
+                        const isPending = isWithdrawalPending(w.status);
+                        const isAccepted = isWithdrawalAccepted(w.status);
+                        const isRejected = isWithdrawalRejected(w.status);
+                        const isProcessing = isProcessingWithdrawal === w.id;
+
+                        return (
+                          <tr key={w.id} className="hover:bg-slate-800/40 transition">
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                              {formattedDate}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-white text-xs">
+                                Pessoa <span className="text-amber-300 font-black">{w.userName || 'Investidor'}</span> levantou{' '}
+                                <span className="text-emerald-400 font-mono font-black">
+                                  {(w.amount || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                                {w.userEmail} {w.uid ? `• UID: ${w.uid.slice(0, 8)}` : ''}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                  w.operator === 'M-Pesa'
+                                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                }`}>
+                                  {w.operator}
+                                </span>
+                                <span className="font-mono font-black text-blue-400 text-xs">
+                                  +258 {w.phoneNumber}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                Titular: {w.userName}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono font-black text-emerald-400 text-sm whitespace-nowrap">
+                              {(w.amount || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-xs text-amber-300 whitespace-nowrap">
+                              +{feeValue.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                            </td>
+                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
+                                isAccepted
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : isRejected
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${
+                                  isAccepted ? 'bg-emerald-400' : isRejected ? 'bg-rose-400' : 'bg-amber-400'
+                                }`}></span>
+                                {isAccepted
+                                  ? '✓ Aceito'
+                                  : isRejected
+                                  ? '✕ Rejeitado'
+                                  : '⏳ Pendente'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              {isPending ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleAcceptWithdrawal(w)}
+                                    disabled={isProcessing}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/30 cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Aceitar"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>{isProcessing ? 'A processar...' : 'Aceitar'}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejectWithdrawal(w)}
+                                    disabled={isProcessing}
+                                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900 text-rose-300 font-bold rounded-xl text-[11px] transition cursor-pointer border border-slate-700 hover:border-rose-700 disabled:opacity-50"
+                                    title="Rejeitar e estornar saldo total ao investidor"
+                                  >
+                                    Rejeitar
+                                  </button>
+                                </div>
+                              ) : isAccepted ? (
+                                <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400">
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>✓ Aceito</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400">
+                                  <span>✕ Rejeitado</span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -2592,12 +2966,77 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {adminWithdrawals.length === 0 ? (
+              {/* Filtros de Levantamento */}
+              <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+                <button
+                  type="button"
+                  onClick={() => setWithdrawalFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    withdrawalFilter === 'all'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  <span>Todos</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900/60 font-mono">
+                    {adminWithdrawals.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWithdrawalFilter('pending')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    withdrawalFilter === 'pending'
+                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Pendentes</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900/60 font-mono">
+                    {pendingWithdrawalsCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWithdrawalFilter('accepted')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    withdrawalFilter === 'accepted'
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Aceitos</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900/60 font-mono">
+                    {acceptedWithdrawalsCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWithdrawalFilter('rejected')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    withdrawalFilter === 'rejected'
+                      ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Rejeitados</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900/60 font-mono">
+                    {rejectedWithdrawalsCount}
+                  </span>
+                </button>
+              </div>
+
+              {filteredAdminWithdrawals.length === 0 ? (
                 <div className="p-16 text-center text-slate-500 text-xs space-y-2">
                   <Smartphone className="w-10 h-10 mx-auto text-slate-700" />
-                  <p className="font-bold text-slate-400">Nenhum pedido de levantamento registado no Firestore</p>
+                  <p className="font-bold text-slate-400">Nenhum pedido de levantamento nesta categoria</p>
                   <p className="text-slate-600">
-                    Assim que os utilizadores solicitarem retirada via M-Pesa ou e-Mola, as operações aparecerão aqui para liquidação imediata.
+                    {withdrawalFilter === 'pending'
+                      ? 'Não há nenhum levantamento pendente aguardando liquidação no momento.'
+                      : 'Assim que houver registos correspondentes no Firestore, eles serão exibidos aqui.'}
                   </p>
                 </div>
               ) : (
@@ -2615,7 +3054,7 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-medium">
-                      {adminWithdrawals.map((w) => {
+                      {filteredAdminWithdrawals.map((w) => {
                         let formattedDate = w.dateStr || 'Hoje';
                         if (w.requestedAt?.toDate) {
                           const d = w.requestedAt.toDate();
@@ -2623,6 +3062,9 @@ export default function AdminPage() {
                         }
                         const feeValue = w.fee !== undefined ? w.fee : ((w.amount || 0) * 0.05);
                         const totalDebit = w.totalDebited !== undefined ? w.totalDebited : ((w.amount || 0) + feeValue);
+                        const isPending = isWithdrawalPending(w.status);
+                        const isAccepted = isWithdrawalAccepted(w.status);
+                        const isRejected = isWithdrawalRejected(w.status);
 
                         return (
                           <tr key={w.id} className="hover:bg-slate-800/40 transition">
@@ -2668,45 +3110,53 @@ export default function AdminPage() {
                             </td>
                             <td className="py-3.5 px-4 text-center whitespace-nowrap">
                               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
-                                w.status === 'COMPLETED'
+                                isAccepted
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                  : w.status === 'REJECTED'
+                                  : isRejected
                                   ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                                   : 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
                               }`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${
-                                  w.status === 'COMPLETED' ? 'bg-emerald-400' : 'bg-amber-400'
+                                  isAccepted ? 'bg-emerald-400' : isRejected ? 'bg-rose-400' : 'bg-amber-400'
                                 }`}></span>
-                                {w.status === 'COMPLETED'
-                                  ? '✓ Fechado'
-                                  : w.status === 'REJECTED'
-                                  ? 'Rejeitado'
-                                  : 'Pendente (2-3h)'}
+                                {isAccepted
+                                  ? '✓ Aceito'
+                                  : isRejected
+                                  ? '✕ Rejeitado'
+                                  : '⏳ Pendente'}
                               </span>
                             </td>
                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                              {w.status === 'PENDING' ? (
+                              {isPending ? (
                                 <div className="flex items-center justify-end gap-1.5">
                                   <button
-                                    onClick={() => handleCloseWithdrawal(w)}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/30 cursor-pointer flex items-center gap-1"
-                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Fechar"
+                                    onClick={() => handleAcceptWithdrawal(w)}
+                                    disabled={isProcessingWithdrawal === w.id}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/30 cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Aceitar / Fechar"
                                   >
                                     <Check className="w-3.5 h-3.5" />
-                                    <span>Fechar</span>
+                                    <span>{isProcessingWithdrawal === w.id ? 'A processar...' : '✓ Aceitar'}</span>
                                   </button>
                                   <button
                                     onClick={() => handleRejectWithdrawal(w)}
-                                    className="px-2 py-1.5 bg-slate-800 hover:bg-rose-900 text-rose-300 font-bold rounded-xl text-[11px] transition cursor-pointer"
+                                    disabled={isProcessingWithdrawal === w.id}
+                                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900/60 border border-slate-700 hover:border-rose-700 text-rose-300 font-bold rounded-xl text-[11px] transition cursor-pointer flex items-center gap-1 disabled:opacity-50"
                                     title="Rejeitar e estornar saldo total ao cliente"
                                   >
-                                    Rejeitar
+                                    <X className="w-3 h-3" />
+                                    <span>Rejeitar</span>
                                   </button>
                                 </div>
-                              ) : (
+                              ) : isAccepted ? (
                                 <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400">
                                   <Check className="w-3.5 h-3.5" />
-                                  <span>Fechado</span>
+                                  <span>Aceito</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400">
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>Rejeitado (Estornado)</span>
                                 </div>
                               )}
                             </td>
@@ -3147,123 +3597,397 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA 4: COMUNICADOS GLOBAIS */}
+        {/* ======================================================== */}
+        {/* ABA: EMITIR COMUNICADO GERAL (GRUPO DE CHAT & TERMINAL) */}
         {/* ======================================================== */}
         {activeTab === 'comunicados' && (
-          <div className="space-y-6 max-w-3xl mx-auto">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center space-x-2">
-                  <Bell className="w-5 h-5 text-amber-400" />
+          <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Header do Card */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1e293b] pb-5">
+                <div className="flex items-center space-x-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 via-yellow-500 to-amber-600 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0 font-black">
+                    <Megaphone className="w-6 h-6 text-slate-950" />
+                  </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white">Transmissor de Comunicados Globais</h3>
-                    <p className="text-xs text-slate-400">
-                      O comunicado ativo aparece como banner no topo da plataforma de todos os utilizadores em tempo real.
+                    <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                      <span>Emitir Comunicado Geral</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                        OFICIAL
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Transmita comunicados no <strong>Grupo de Chat</strong> com design executivo profissional e no banner do terminal em tempo real.
                     </p>
                   </div>
                 </div>
 
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <span className="text-xs font-bold text-slate-300">
-                    {announcement.active ? 'Comunicado Ativo' : 'Desativado'}
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={announcement.active}
-                    onChange={(e) => setAnnouncement({ ...announcement, active: e.target.checked })}
-                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
-                  />
-                </label>
+                <Link
+                  href="/chat"
+                  target="_blank"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-1.5 self-start sm:self-center cursor-pointer"
+                >
+                  <MessageCircle className="w-4 h-4 text-blue-400" />
+                  <span>Ver Grupo de Chat</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                </Link>
               </div>
 
-              {/* Form */}
-              <div className="space-y-4">
+              {/* Form de Criação do Comunicado */}
+              <div className="grid grid-cols-1 gap-5">
+                {/* Título do Comunicado */}
                 <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                    Título do Comunicado
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
+                    <span>Título do Comunicado Oficial</span>
+                    <span className="text-amber-400">*</span>
                   </label>
                   <input
                     type="text"
                     value={announcement.title}
                     onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })}
-                    placeholder="Ex: Aviso Importante da Mesa de Operações"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+                    placeholder="Ex: DIRETRIZ DA MESA DE OPERAÇÕES • JANELA DAS 21H"
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white focus:outline-none focus:border-blue-500 font-semibold transition"
                   />
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    Aparecerá em destaque em letras maiúsculas no topo do card executivo no grupo.
+                  </p>
                 </div>
 
+                {/* Mensagem do Comunicado */}
                 <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                    Mensagem a Exibir para Todos os Usuários
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
+                    <span>Texto Completo do Comunicado</span>
+                    <span className="text-amber-400">*</span>
                   </label>
                   <textarea
-                    rows={3}
+                    rows={4}
                     value={announcement.message}
                     onChange={(e) => setAnnouncement({ ...announcement, message: e.target.value })}
-                    placeholder="Mensagem oficial..."
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+                    placeholder="Escreva a mensagem oficial da administração..."
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white focus:outline-none focus:border-blue-500 leading-relaxed transition"
                   />
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    Suporta parágrafos bem espaçados, emojis (📈, 🚨, 💡, 🌽) e avisos detalhados.
+                  </p>
                 </div>
 
+                {/* Nível de Alerta */}
                 <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                    Estilo / Nível de Alerta
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
+                    Estilo / Nível Institucional do Comunicado
                   </label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     {[
-                      { id: 'info', label: 'Informativo', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' },
-                      { id: 'warning', label: 'Aviso / Alerta', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
-                      { id: 'urgent', label: 'Urgente', color: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
-                      { id: 'success', label: 'Institucional', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' }
+                      { id: 'info', label: 'Informativo', desc: 'Azul Executivo', color: 'bg-blue-600/20 text-blue-300 border-blue-500/50' },
+                      { id: 'warning', label: 'Aviso de Mercado', desc: 'Dourado / Ouro', color: 'bg-amber-500/20 text-amber-300 border-amber-500/50' },
+                      { id: 'urgent', label: 'Alerta Urgente', desc: 'Vermelho / Rubro', color: 'bg-rose-500/20 text-rose-300 border-rose-500/50' },
+                      { id: 'success', label: 'Institucional', desc: 'Verde Esmeralda', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' }
                     ].map((t) => (
                       <button
                         key={t.id}
                         type="button"
                         onClick={() => setAnnouncement({ ...announcement, type: t.id as any })}
-                        className={`py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
+                        className={`p-3 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
                           announcement.type === t.id
-                            ? `${t.color} ring-1 ring-white/20`
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800'
+                            ? `${t.color} ring-2 ring-white/30 shadow-lg`
+                            : 'bg-slate-950/80 text-slate-400 border-slate-800 hover:bg-slate-800/60'
                         }`}
                       >
-                        {t.label}
+                        <span className="text-xs font-bold block">{t.label}</span>
+                        <span className="text-[10px] opacity-75 mt-0.5">{t.desc}</span>
                       </button>
                     ))}
                   </div>
                 </div>
-              </div>
 
-              {/* Live Preview */}
-              <div className="space-y-1.5 pt-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Pré-visualização em Tempo Real (Como os Investidores Verão no Terminal)
-                </label>
-                <div
-                  className={`p-3.5 rounded-2xl border flex items-start space-x-3 text-xs ${
-                    announcement.type === 'warning'
-                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-200'
-                      : announcement.type === 'urgent'
-                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-200'
-                      : announcement.type === 'success'
-                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
-                      : 'bg-blue-500/15 border-blue-500/30 text-blue-200'
-                  }`}
-                >
-                  <Bell className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold">{announcement.title || 'Título do Comunicado'}</p>
-                    <p className="mt-0.5 opacity-90">{announcement.message || 'Mensagem do comunicado...'}</p>
-                  </div>
+                {/* Opções de Transmissão */}
+                <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-3">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                    Canais de Divulgação e Fixação
+                  </span>
+
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={broadcastToGroup}
+                      onChange={(e) => setBroadcastToGroup(e.target.checked)}
+                      className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                    />
+                    <div className="text-xs text-slate-300">
+                      <span className="font-bold text-white group-hover:text-blue-300 transition">
+                        Publicar no Grupo de Chat Geral TapRise
+                      </span>
+                      <p className="text-slate-500 text-[11px]">
+                        Gera o card executivo oficial estilizado no feed do grupo para todos os investidores.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={pinInGroupChat}
+                      disabled={!broadcastToGroup}
+                      onChange={(e) => setPinInGroupChat(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer disabled:opacity-50"
+                    />
+                    <div className="text-xs text-slate-300">
+                      <span className="font-bold text-white group-hover:text-amber-300 transition flex items-center gap-1.5">
+                        <Pin className="w-3.5 h-3.5 text-amber-400 rotate-45" />
+                        <span>Fixar no topo do Grupo de Chat (Pinned Notice)</span>
+                      </span>
+                      <p className="text-slate-500 text-[11px]">
+                        Mantém o comunicado em destaque permanente na barra superior do chat.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={announcement.active}
+                      onChange={(e) => setAnnouncement({ ...announcement, active: e.target.checked })}
+                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <div className="text-xs text-slate-300">
+                      <span className="font-bold text-white group-hover:text-emerald-300 transition">
+                        Ativar também no Banner Superior do Terminal de Trading
+                      </span>
+                      <p className="text-slate-500 text-[11px]">
+                        Exibe o banner no topo da plataforma de todos os utilizadores conectados.
+                      </p>
+                    </div>
+                  </label>
                 </div>
               </div>
 
-              <div className="flex justify-end pt-2">
+              {/* Aba de Pré-Visualização em Tempo Real */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Pré-visualização do Comunicado
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setAnnouncementPreviewTab('group')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        announcementPreviewTab === 'group'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Card do Grupo de Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnnouncementPreviewTab('banner')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        announcementPreviewTab === 'banner'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Banner do Terminal
+                    </button>
+                  </div>
+                </div>
+
+                {/* Preview 1: Como aparece no GRUPO DE CHAT */}
+                {announcementPreviewTab === 'group' && (
+                  <div className="p-4 sm:p-6 bg-slate-950 rounded-2xl border border-slate-800">
+                    <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 flex items-center justify-between">
+                      <span>Simulação exata de exibição dentro do Grupo</span>
+                      <span className="text-emerald-400 font-bold">100% Organizado &amp; Profissional</span>
+                    </div>
+
+                    {/* O Card do Comunicado Idêntico ao Chat */}
+                    {(() => {
+                      const aType = announcement.type || 'info';
+                      const pTheme = {
+                        urgent: {
+                          wrapper: 'from-rose-950/80 via-slate-900 to-rose-950/70 border-rose-500/70',
+                          badgeClass: 'bg-rose-600 text-white font-black',
+                          badgeText: 'COMUNICADO URGENTE',
+                          iconBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+                          icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
+                          topBorder: 'from-rose-500 via-red-400 to-rose-600',
+                          titleColor: 'text-white',
+                          bodyBg: 'bg-rose-950/40 border-rose-800/40 text-rose-50'
+                        },
+                        warning: {
+                          wrapper: 'from-amber-950/80 via-slate-900 to-amber-950/70 border-amber-500/70',
+                          badgeClass: 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black',
+                          badgeText: 'AVISO DE MERCADO',
+                          iconBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                          icon: <Flame className="w-5 h-5 text-amber-400" />,
+                          topBorder: 'from-amber-500 via-yellow-400 to-amber-600',
+                          titleColor: 'text-amber-100',
+                          bodyBg: 'bg-amber-950/40 border-amber-800/40 text-amber-50'
+                        },
+                        success: {
+                          wrapper: 'from-emerald-950/80 via-slate-900 to-emerald-950/70 border-emerald-500/70',
+                          badgeClass: 'bg-emerald-600 text-white font-black',
+                          badgeText: 'DIRETRIZ INSTITUCIONAL',
+                          iconBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+                          icon: <CheckCircle2 className="w-5 h-5 text-emerald-400" />,
+                          topBorder: 'from-emerald-500 via-teal-400 to-emerald-600',
+                          titleColor: 'text-emerald-100',
+                          bodyBg: 'bg-emerald-950/40 border-emerald-800/40 text-emerald-50'
+                        },
+                        info: {
+                          wrapper: 'from-blue-950/85 via-slate-900 to-indigo-950/70 border-blue-500/70',
+                          badgeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black',
+                          badgeText: 'COMUNICADO OFICIAL',
+                          iconBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+                          icon: <ShieldCheck className="w-5 h-5 text-blue-400" />,
+                          topBorder: 'from-blue-500 via-indigo-400 to-blue-600',
+                          titleColor: 'text-white',
+                          bodyBg: 'bg-blue-950/40 border-blue-800/40 text-blue-50'
+                        }
+                      }[aType] || {
+                        wrapper: 'from-blue-950/85 via-slate-900 to-indigo-950/70 border-blue-500/70',
+                        badgeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black',
+                        badgeText: 'COMUNICADO OFICIAL',
+                        iconBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+                        icon: <ShieldCheck className="w-5 h-5 text-blue-400" />,
+                        topBorder: 'from-blue-500 via-indigo-400 to-blue-600',
+                        titleColor: 'text-white',
+                        bodyBg: 'bg-blue-950/40 border-blue-800/40 text-blue-50'
+                      };
+
+                      return (
+                        <div className={`rounded-3xl bg-gradient-to-br ${pTheme.wrapper} border-2 shadow-2xl p-4 sm:p-6 relative overflow-hidden`}>
+                          <div className={`absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r ${pTheme.topBorder}`} />
+
+                          {/* Cabeçalho */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                            <div className="flex items-center space-x-3">
+                              <div className={`w-11 h-11 rounded-2xl ${pTheme.iconBg} border flex items-center justify-center shrink-0 shadow-lg`}>
+                                {pTheme.icon}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs sm:text-sm font-black text-white tracking-wide uppercase">
+                                    Administração Central TapRise
+                                  </span>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-500/20 text-blue-300 border border-blue-400/30 uppercase tracking-wider">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-blue-400" />
+                                    OFICIAL BMM
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                  Mesa Diretora de Operações • TapRise Mercadorias Moçambique
+                                </p>
+                              </div>
+                            </div>
+
+                            <span className={`px-3 py-1 rounded-full text-[10px] uppercase tracking-wider shadow-sm flex items-center gap-1.5 self-start sm:self-center ${pTheme.badgeClass}`}>
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                              <span>{pTheme.badgeText}</span>
+                            </span>
+                          </div>
+
+                          {/* Título */}
+                          <div className="pt-4 pb-2">
+                            <div className="flex items-center gap-2 text-xs text-amber-300 font-bold uppercase tracking-wider mb-1">
+                              <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Transmissão Oficial aos Investidores</span>
+                            </div>
+                            <h3 className={`text-base sm:text-lg font-black tracking-tight leading-snug ${pTheme.titleColor}`}>
+                              {announcement.title || 'DIRETRIZ OFICIAL DA MESA DE OPERAÇÕES'}
+                            </h3>
+                          </div>
+
+                          {/* Mensagem */}
+                          <div className={`mt-2 p-4 rounded-2xl ${pTheme.bodyBg} border leading-relaxed text-xs sm:text-sm whitespace-pre-wrap font-sans select-text shadow-inner`}>
+                            {announcement.message || 'Digite a mensagem acima para ver a pré-visualização completa em tempo real...'}
+                          </div>
+
+                          {/* Rodapé e reações */}
+                          <div className="mt-4 pt-3 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-slate-400">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                              <span>Comunicado em vigor para todos os participantes de mercado.</span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                              <span className="px-2.5 py-1 rounded-xl text-xs bg-slate-900/80 border border-slate-700/80 text-slate-300 flex items-center gap-1">
+                                <span>👍</span>
+                                <span className="font-mono text-[10px] font-bold">1</span>
+                              </span>
+                              <span className="px-2.5 py-1 rounded-xl text-xs bg-slate-900/80 border border-slate-700/80 text-slate-300 flex items-center gap-1">
+                                <span>🚀</span>
+                                <span className="font-mono text-[10px] font-bold">1</span>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Preview 2: Como aparece no TERMINAL */}
+                {announcementPreviewTab === 'banner' && (
+                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+                    <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">
+                      Banner Superior no Terminal de Trading
+                    </p>
+                    <div
+                      className={`p-3.5 rounded-2xl border flex items-start space-x-3 text-xs ${
+                        announcement.type === 'warning'
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-200'
+                          : announcement.type === 'urgent'
+                          ? 'bg-rose-500/15 border-rose-500/30 text-rose-200'
+                          : announcement.type === 'success'
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
+                          : 'bg-blue-500/15 border-blue-500/30 text-blue-200'
+                      }`}
+                    >
+                      <Bell className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">{announcement.title || 'Título do Comunicado'}</p>
+                        <p className="mt-0.5 opacity-90">{announcement.message || 'Mensagem do comunicado...'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Botão de Envio Principal */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#1e293b]">
+                <div className="text-xs text-slate-400 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>
+                    {broadcastToGroup
+                      ? 'Transmitirá no Grupo de Chat com layout executivo oficial.'
+                      : 'Salvará apenas no banner superior do terminal.'}
+                  </span>
+                </div>
+
                 <button
+                  type="button"
                   onClick={handleSaveAnnouncement}
                   disabled={isSavingAnnouncement}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition disabled:opacity-50 cursor-pointer"
+                  className="w-full sm:w-auto px-7 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-2xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-blue-600/30 transition disabled:opacity-50 cursor-pointer border border-blue-400/30"
                 >
-                  <Send className="w-4 h-4" />
-                  <span>{isSavingAnnouncement ? 'A transmitir...' : 'Publicar Comunicado'}</span>
+                  {isSavingAnnouncement ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>A transmitir comunicado...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Megaphone className="w-4 h-4 text-amber-300" />
+                      <span>Emitir Comunicado Geral Agora</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

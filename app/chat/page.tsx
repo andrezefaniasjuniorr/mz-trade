@@ -27,7 +27,10 @@ import {
   Sparkles,
   Loader2,
   Pencil,
-  Check
+  Check,
+  Bell,
+  Pin,
+  Flame
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
@@ -166,10 +169,200 @@ const GroupMessageItem = memo(function GroupMessageItem({
   currentUserId
 }: GroupMessageItemProps) {
   const [showPicker, setShowPicker] = useState(false);
-  const isSystem = msg.type === 'system';
+  const isAnnouncement =
+    msg.type === 'announcement' ||
+    Boolean(msg.announcementTitle) ||
+    Boolean(msg.isAdmin && msg.text && (msg.text.includes('📢') || msg.text.includes('COMUNICADO') || msg.text.includes('AVISO OFICIAL')));
+  const isSystem = msg.type === 'system' && !isAnnouncement;
   const isMsgAdmin = msg.isAdmin;
   const isImage = msg.type === 'image' || !!msg.imageUrl || !!msg.localPreviewUrl;
 
+  // ----------------------------------------------------
+  // CARD DE COMUNICADO GERAL OFICIAL (ORGANIZADO, ELEGANTE E PROFISSIONAL)
+  // ----------------------------------------------------
+  if (isAnnouncement) {
+    const aType = msg.announcementType || 'info';
+    const titleDisplay =
+      msg.announcementTitle ||
+      (msg.text?.includes('21h')
+        ? 'DIRETRIZ OFICIAL • JANELA DAS 21H'
+        : msg.text?.includes('AVISO')
+        ? 'AVISO DA MESA DIRETORA'
+        : 'COMUNICADO OFICIAL DA ADMINISTRAÇÃO');
+
+    const theme = {
+      urgent: {
+        wrapper: 'from-rose-950/80 via-slate-900 to-rose-950/70 border-rose-500/70 shadow-rose-950/50',
+        glow: 'bg-rose-500/20',
+        badgeClass: 'bg-rose-600 text-white shadow-rose-600/30 font-black',
+        badgeText: 'COMUNICADO URGENTE',
+        iconBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+        icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
+        topBorder: 'from-rose-500 via-red-400 to-rose-600',
+        titleColor: 'text-white',
+        bodyBg: 'bg-rose-950/40 border-rose-800/40 text-rose-50',
+        authorColor: 'text-rose-300'
+      },
+      warning: {
+        wrapper: 'from-amber-950/80 via-slate-900 to-amber-950/70 border-amber-500/70 shadow-amber-950/50',
+        glow: 'bg-amber-500/20',
+        badgeClass: 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black shadow-amber-500/30',
+        badgeText: 'AVISO DE MERCADO',
+        iconBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+        icon: <Flame className="w-5 h-5 text-amber-400" />,
+        topBorder: 'from-amber-500 via-yellow-400 to-amber-600',
+        titleColor: 'text-amber-100',
+        bodyBg: 'bg-amber-950/40 border-amber-800/40 text-amber-50',
+        authorColor: 'text-amber-300'
+      },
+      success: {
+        wrapper: 'from-emerald-950/80 via-slate-900 to-emerald-950/70 border-emerald-500/70 shadow-emerald-950/50',
+        glow: 'bg-emerald-500/20',
+        badgeClass: 'bg-emerald-600 text-white shadow-emerald-600/30 font-black',
+        badgeText: 'DIRETRIZ INSTITUCIONAL',
+        iconBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+        icon: <CheckCircle2 className="w-5 h-5 text-emerald-400" />,
+        topBorder: 'from-emerald-500 via-teal-400 to-emerald-600',
+        titleColor: 'text-emerald-100',
+        bodyBg: 'bg-emerald-950/40 border-emerald-800/40 text-emerald-50',
+        authorColor: 'text-emerald-300'
+      },
+      info: {
+        wrapper: 'from-blue-950/85 via-slate-900 to-indigo-950/70 border-blue-500/70 shadow-blue-950/50',
+        glow: 'bg-blue-500/20',
+        badgeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-600/30 font-black',
+        badgeText: 'COMUNICADO OFICIAL',
+        iconBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+        icon: <ShieldCheck className="w-5 h-5 text-blue-400" />,
+        topBorder: 'from-blue-500 via-indigo-400 to-blue-600',
+        titleColor: 'text-white',
+        bodyBg: 'bg-blue-950/40 border-blue-800/40 text-blue-50',
+        authorColor: 'text-blue-300'
+      }
+    }[aType] || {
+      wrapper: 'from-blue-950/85 via-slate-900 to-indigo-950/70 border-blue-500/70 shadow-blue-950/50',
+      glow: 'bg-blue-500/20',
+      badgeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-600/30 font-black',
+      badgeText: 'COMUNICADO OFICIAL',
+      iconBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+      icon: <ShieldCheck className="w-5 h-5 text-blue-400" />,
+      topBorder: 'from-blue-500 via-indigo-400 to-blue-600',
+      titleColor: 'text-white',
+      bodyBg: 'bg-blue-950/40 border-blue-800/40 text-blue-50',
+      authorColor: 'text-blue-300'
+    };
+
+    return (
+      <motion.div
+        id={`msg-${msg.id}`}
+        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        className="w-full max-w-2xl mx-auto my-4 group relative select-text"
+      >
+        <div className={`rounded-3xl bg-gradient-to-br ${theme.wrapper} border-2 shadow-2xl p-4 sm:p-6 backdrop-blur-md relative overflow-hidden`}>
+          {/* Barra de brilho superior */}
+          <div className={`absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r ${theme.topBorder}`} />
+          <div className={`absolute -top-12 -right-12 w-40 h-40 ${theme.glow} rounded-full blur-3xl pointer-events-none`} />
+
+          {/* Topo do Comunicado */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+            <div className="flex items-center space-x-3">
+              <div className={`w-11 h-11 rounded-2xl ${theme.iconBg} border flex items-center justify-center shrink-0 shadow-lg`}>
+                {theme.icon}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs sm:text-sm font-black text-white tracking-wide uppercase">
+                    {msg.displayName || 'Administração Central TapRise'}
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-500/20 text-blue-300 border border-blue-400/30 uppercase tracking-wider">
+                    <CheckCircle2 className="w-2.5 h-2.5 text-blue-400" />
+                    OFICIAL BMM
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                  Mesa Diretora de Operações • TapRise Mercadorias Moçambique
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-center">
+              <span className={`px-3 py-1 rounded-full text-[10px] uppercase tracking-wider shadow-sm flex items-center gap-1.5 ${theme.badgeClass}`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                <span>{theme.badgeText}</span>
+              </span>
+              <span className="text-[11px] font-mono text-slate-400 pl-1">
+                {formatTime(msg.createdAt)}
+              </span>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(msg.id)}
+                  className="opacity-70 hover:opacity-100 p-1.5 bg-slate-800/80 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl transition cursor-pointer ml-1"
+                  title="Apagar comunicado do grupo"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Título do Comunicado */}
+          {titleDisplay && (
+            <div className="pt-4 pb-2">
+              <div className="flex items-center gap-2 text-xs text-amber-300 font-bold uppercase tracking-wider mb-1">
+                <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                <span>Transmissão Oficial aos Investidores</span>
+              </div>
+              <h3 className={`text-base sm:text-lg font-black tracking-tight leading-snug ${theme.titleColor}`}>
+                {titleDisplay}
+              </h3>
+            </div>
+          )}
+
+          {/* Mensagem / Corpo */}
+          <div className={`mt-2 p-4 rounded-2xl ${theme.bodyBg} border leading-relaxed text-xs sm:text-sm whitespace-pre-wrap font-sans select-text shadow-inner`}>
+            {msg.text}
+          </div>
+
+          {/* Rodapé com Assinatura e Reações */}
+          <div className="mt-4 pt-3 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-slate-400">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Comunicado em vigor para todos os participantes de mercado.</span>
+            </div>
+
+            {/* Reações dos Investidores */}
+            <div className="flex items-center gap-1.5 self-end sm:self-auto">
+              {AVAILABLE_REACTIONS.map((emoji) => {
+                const count = msg.reactions?.[emoji] || 0;
+                const userReacted = currentUserId && msg.userReactions?.[currentUserId] === emoji;
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => onReact(msg, emoji)}
+                    className={`px-2.5 py-1 rounded-xl text-xs flex items-center gap-1 transition cursor-pointer border ${
+                      userReacted
+                        ? 'bg-blue-600/30 border-blue-400 text-white font-bold'
+                        : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>{emoji}</span>
+                    {count > 0 && <span className="font-mono text-[10px] font-bold">{count}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // MENSAGEM DO SISTEMA (UPGRADED)
   if (isSystem) {
     return (
       <motion.div
@@ -177,14 +370,14 @@ const GroupMessageItem = memo(function GroupMessageItem({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18 }}
-        className="max-w-xl mx-auto my-2.5 p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-yellow-500/20 to-amber-500/15 border border-amber-500/40 text-amber-200 text-xs shadow-xs space-y-1.5 transition relative group"
+        className="max-w-xl mx-auto my-3 p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-slate-900 to-amber-500/15 border border-amber-500/40 text-amber-200 text-xs shadow-lg space-y-2 transition relative group"
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-amber-400 font-black text-[11px] uppercase tracking-wider">
-            <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+            <Megaphone className="w-4 h-4 text-amber-400" />
             <span>{msg.displayName}</span>
-            <span className="bg-amber-400 text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded-md">
-              SISTEMA
+            <span className="bg-amber-400 text-slate-950 font-black text-[9px] px-2 py-0.5 rounded-md">
+              SISTEMA OFICIAL
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -193,6 +386,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
             </span>
             {isAdmin && (
               <button
+                type="button"
                 onClick={() => onDelete(msg.id)}
                 className="opacity-0 group-hover:opacity-100 p-1 text-rose-400 hover:text-rose-200 rounded transition cursor-pointer"
                 title="Apagar aviso"
@@ -605,6 +799,11 @@ export default function ChatPage() {
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState<boolean>(false);
+  const [pinnedNotice, setPinnedNotice] = useState<{
+    pinnedMessageId?: string | null;
+    pinnedText?: string;
+    pinnedAuthor?: string;
+  } | null>(null);
 
   // --- ESTADO DO CHAT PRIVADO ---
   const [privateChatsList, setPrivateChatsList] = useState<PrivateChatDoc[]>(() => loadLocalPrivateChats());
@@ -680,16 +879,21 @@ export default function ChatPage() {
 
         snapshot.forEach((docSnap) => {
           const d = docSnap.data();
+          const isMsgAdmin = d.isAdmin === true || d.email === ADMIN_EMAIL;
+          const msgType = d.type || (d.imageUrl ? 'image' : (d.announcementTitle ? 'announcement' : 'text'));
           const msg: GroupMessage = {
             id: docSnap.id,
             uid: d.uid || '',
-            displayName: d.displayName || 'Investidor TapRise',
+            displayName: d.displayName || (isMsgAdmin ? 'Administração Central TapRise' : 'Investidor TapRise'),
             email: d.email || '',
-            isAdmin: d.isAdmin === true || d.email === ADMIN_EMAIL,
+            isAdmin: isMsgAdmin,
             text: d.text || '',
             replyToId: d.replyToId || null,
             createdAt: d.createdAt,
-            type: d.type || (d.imageUrl ? 'image' : 'text'),
+            type: msgType,
+            announcementTitle: d.announcementTitle || d.title || (msgType === 'announcement' ? 'COMUNICADO OFICIAL DA ADMINISTRAÇÃO' : undefined),
+            announcementType: d.announcementType || d.alertType || 'info',
+            pinned: Boolean(d.pinned),
             imageUrl: d.imageUrl,
             imageWidth: d.imageWidth,
             imageHeight: d.imageHeight,
@@ -737,6 +941,29 @@ export default function ChatPage() {
     );
 
     return () => unsubscribe();
+  }, []);
+
+  // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat)
+  useEffect(() => {
+    const pinnedRef = doc(db, 'admin_config', 'chat');
+    const unsub = onSnapshot(pinnedRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.pinnedText) {
+          setPinnedNotice({
+            pinnedMessageId: d.pinnedMessageId || null,
+            pinnedText: d.pinnedText,
+            pinnedAuthor: d.pinnedAuthor || 'Administração TapRise'
+          });
+        } else {
+          setPinnedNotice(null);
+        }
+      } else {
+        setPinnedNotice(null);
+      }
+    }, (err) => console.warn('Erro ao escutar aviso fixado:', err));
+
+    return () => unsub();
   }, []);
 
   // 2. PRESENÇA REAL (taprise_presence)
@@ -1579,6 +1806,36 @@ export default function ChatPage() {
       {activeSegment === 'grupo' && (
         <div className="flex-1 flex flex-col min-h-0 relative bg-[#0f172a]" style={{ backgroundColor: '#0f172a' }}>
           
+          {/* Barra Fixada de Comunicado no Topo do Grupo */}
+          {pinnedNotice && pinnedNotice.pinnedText && (
+            <div
+              onClick={() => {
+                if (pinnedNotice.pinnedMessageId) {
+                  scrollToMessage(pinnedNotice.pinnedMessageId);
+                }
+              }}
+              className="bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border-b border-amber-500/40 px-4 py-2.5 flex items-center justify-between text-xs text-amber-200 cursor-pointer hover:bg-amber-900/40 transition shrink-0 z-20 shadow-md"
+            >
+              <div className="flex items-center gap-2 overflow-hidden mr-2">
+                <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/30">
+                  <Pin className="w-3.5 h-3.5 rotate-45" />
+                </div>
+                <div className="overflow-hidden">
+                  <span className="font-black text-amber-400 text-[10px] uppercase tracking-wider block">
+                    Aviso Fixado da Administração
+                  </span>
+                  <p className="text-slate-200 truncate text-xs font-medium">
+                    {pinnedNotice.pinnedText}
+                  </p>
+                </div>
+              </div>
+              <span className="text-[11px] text-amber-400 font-bold font-mono shrink-0 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 flex items-center gap-1">
+                <span>Ver</span>
+                <span>↗</span>
+              </span>
+            </div>
+          )}
+
           {/* Stream de Mensagens com Scroll */}
           <div
             ref={chatContainerRef}

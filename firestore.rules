@@ -99,7 +99,7 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
     match /withdrawals/{wId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /orders/{orderId} {
       allow read, write: if isSignedIn();

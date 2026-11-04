@@ -23,7 +23,10 @@ export interface GroupMessage {
     text: string;
   } | null;
   createdAt: any;
-  type?: 'text' | 'system' | 'image';
+  type?: 'text' | 'system' | 'image' | 'announcement';
+  announcementTitle?: string;
+  announcementType?: 'info' | 'warning' | 'urgent' | 'success';
+  pinned?: boolean;
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;

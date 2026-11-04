@@ -981,30 +981,47 @@ export default function Home() {
       setUserTransactions(list);
     }, (e) => console.warn('Erro ao escutar transações:', e));
 
-    // Listen withdrawals
+    // Listen withdrawals em tempo real
     const wRef = collection(db, 'withdrawals');
-    const qW = query(wRef, limit(100));
-    const unsubW = onSnapshot(qW, (snapshot) => {
+    const unsubW = onSnapshot(wRef, (snapshot) => {
       const list: WithdrawalRecord[] = [];
       snapshot.forEach((d) => {
         const data = d.data();
-        if (data.uid === user.uid) {
+        if (data.uid === user.uid || data.userId === user.uid || (user.email && data.userEmail === user.email)) {
           list.push({ id: d.id, ...data } as WithdrawalRecord);
         }
       });
       list.sort((a, b) => {
-        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.requestedAt?.seconds ? a.requestedAt.seconds * 1000 : 0);
-        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.requestedAt?.seconds ? b.requestedAt.seconds * 1000 : 0);
+        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.requestedAt?.seconds ? a.requestedAt.seconds * 1000 : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0));
+        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.requestedAt?.seconds ? b.requestedAt.seconds * 1000 : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0));
         return tB - tA;
       });
       setUserWithdrawals(list);
-    }, (e) => console.warn('Erro ao escutar levantamentos:', e));
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('taprise_user_withdrawals', JSON.stringify(list));
+        } catch {}
+      }
+    }, (e) => {
+      console.warn('Erro ao escutar levantamentos:', e);
+      // Fallback via getDocs se onSnapshot atrasar
+      getDocs(collection(db, 'withdrawals')).then((snap) => {
+        const list: WithdrawalRecord[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.uid === user.uid || data.userId === user.uid || (user.email && data.userEmail === user.email)) {
+            list.push({ id: d.id, ...data } as WithdrawalRecord);
+          }
+        });
+        setUserWithdrawals(list);
+      }).catch(() => {});
+    });
 
     return () => {
       unsubTx();
       unsubW();
     };
-  }, [user?.uid]);
+  }, [user?.uid, user?.email]);
 
   // Lógica do Usuário - 1 VEZ POR DIA (Janela 21h):
   const todayMaputoStr = maputoTime.dateStr;
@@ -1270,6 +1287,7 @@ export default function Home() {
       // B. Registar pedido na coleção 'withdrawals'
       const withdrawalDocRef = await addDoc(collection(db, 'withdrawals'), {
         uid: user.uid,
+        userId: user.uid,
         userEmail: user.email || '',
         userName: cleanName,
         operator: operatorLabel,
@@ -1278,10 +1296,12 @@ export default function Home() {
         fee: fee,
         totalDebited: totalDebitado,
         remainingBalance: saldoRestante,
-        status: 'PENDING',
+        status: 'pendente',
+        statusNormalized: 'PENDING',
         processingTime: '2 a 3 horas',
         statusMessage: 'Aguarde entre 2 a 3 horas para a validação bancária e envio dos fundos.',
         requestedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
         dateStr: hoje,
       });
 
@@ -3016,22 +3036,34 @@ export default function Home() {
                                     <span>{item.processingTime || '2 a 3 horas'}</span>
                                   </td>
                                   <td className="py-3.5 text-right">
-                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1 ${
-                                      item.status === 'COMPLETED'
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : item.status === 'REJECTED'
-                                        ? 'bg-rose-100 text-rose-800'
-                                        : 'bg-amber-100 text-amber-800 animate-pulse'
-                                    }`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${
-                                        item.status === 'COMPLETED' ? 'bg-emerald-600' : 'bg-amber-600'
-                                      }`}></span>
-                                      {item.status === 'COMPLETED'
-                                        ? 'Concluído'
-                                        : item.status === 'REJECTED'
-                                        ? 'Cancelado'
-                                        : 'Em Processamento (2-3h)'}
-                                    </span>
+                                    {(() => {
+                                      const s = (item.status || '').toLowerCase();
+                                      const isAceito = s === 'aceito' || s === 'completed' || s === 'aprovado' || s === 'fechado';
+                                      const isRejeitado = s === 'rejeitado' || s === 'rejected';
+
+                                      if (isAceito) {
+                                        return (
+                                          <span className="px-3 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                            <span>Aceito</span>
+                                          </span>
+                                        );
+                                      }
+                                      if (isRejeitado) {
+                                        return (
+                                          <span className="px-3 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1.5 bg-rose-100 text-rose-800 border border-rose-300">
+                                            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                                            <span>Rejeitado</span>
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span className="px-3 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                                          <span>Pendente</span>
+                                        </span>
+                                      );
+                                    })()}
                                   </td>
                                 </tr>
                               );
