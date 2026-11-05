@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -49,7 +49,8 @@ import {
   Target,
   Briefcase,
   Coins,
-  MessageCircle
+  MessageCircle,
+  UserCheck
 } from 'lucide-react';
 
 import Link from 'next/link';
@@ -688,6 +689,27 @@ const InteractiveChart = ({
   );
 };
 
+// Stable Clock Store for useSyncExternalStore (cached snapshot prevents re-render infinite loops)
+let cachedClockNow = typeof window !== 'undefined' ? Date.now() : 0;
+const clockListeners = new Set<() => void>();
+
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    cachedClockNow = Date.now();
+    clockListeners.forEach((cb) => cb());
+  }, 10000);
+}
+
+const subscribeToClock = (callback: () => void) => {
+  clockListeners.add(callback);
+  return () => {
+    clockListeners.delete(callback);
+  };
+};
+
+const getClockSnapshot = () => cachedClockNow;
+const getClockServerSnapshot = () => 0;
+
 // ==========================================
 // MAIN COMPONENT (PAGE)
 // ==========================================
@@ -758,13 +780,8 @@ export default function Home() {
   // Incremental ID generator ref for trades and positions to avoid impurity
   const counterRef = useRef(100);
 
-  // Client-side timestamp state to maintain pure render for cooldown timer
-  const [nowTimestamp, setNowTimestamp] = useState<number>(0);
-  useEffect(() => {
-    setNowTimestamp(Date.now());
-    const interval = setInterval(() => setNowTimestamp(Date.now()), 15000);
-    return () => clearInterval(interval);
-  }, []);
+  // Client-side timestamp external store to maintain pure render for cooldown timer
+  const nowTimestamp = useSyncExternalStore(subscribeToClock, getClockSnapshot, getClockServerSnapshot);
 
   // Active selected commodity derived cleanly
   const selectedAsset = useMemo(() => {
@@ -825,6 +842,13 @@ export default function Home() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [userTransactions, setUserTransactions] = useState<UserTransaction[]>([]);
   const [userWithdrawals, setUserWithdrawals] = useState<WithdrawalRecord[]>([]);
+  const [userCommissions, setUserCommissions] = useState<Array<{
+    id: string;
+    amount: number;
+    referredName?: string;
+    referredEmail?: string;
+    referredUid?: string;
+  }>>([]);
   const [withdrawalWindow, setWithdrawalWindow] = useState<WithdrawalWindowDetails>(getMaputoWithdrawalWindowDetails());
   const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState<boolean>(false);
   const [withdrawalMethod, setWithdrawalMethod] = useState<'mpesa' | 'emola'>('mpesa');
@@ -852,6 +876,13 @@ export default function Home() {
   // Código de Convite Garantido e Instantâneo
   const fallbackCode = user ? (user.uid.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'TRBONUS5') : 'TRBONUS5';
   const displayInviteCode = userProfile?.inviteCode || fallbackCode;
+
+  // Contabilidade em tempo real de convidados com 1º depósito e total de comissões ganhas (5%)
+  const liveCommissionsSum = userCommissions.reduce((acc, c) => acc + (c.amount || 0), 0);
+  const liveDepositedCount = userCommissions.length;
+  // REGRA: Apenas investidores que realizaram depósito contam nos convidados registados
+  const activeDepositedInvitedCount = Math.max(userProfile?.indicadosCount || 0, liveDepositedCount);
+  const totalCommissionsEarned = Math.max(userProfile?.totalComissoes || 0, liveCommissionsSum);
 
   // Se o usuário existir e ainda não tiver inviteCode no Firestore, salva em background
   useEffect(() => {
@@ -1025,9 +1056,47 @@ export default function Home() {
       }).catch(() => {});
     });
 
+    // Listen commissions em tempo real (Garante contagem exata de convidados com 1º depósito e soma de comissões)
+    const commRef = collection(db, 'commissions');
+    const unsubComm = onSnapshot(commRef, (snapshot) => {
+      const list: Array<{ id: string; amount: number; referredName?: string; referredEmail?: string; referredUid?: string }> = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        if (data.referrerUid === user.uid) {
+          list.push({
+            id: d.id,
+            amount: Number(data.commissionAmount || 0),
+            referredName: data.referredName || '',
+            referredEmail: data.referredEmail || '',
+            referredUid: data.referredUid || ''
+          });
+        }
+      });
+      setUserCommissions(list);
+    }, (e) => {
+      console.warn('Erro ao escutar comissões:', e);
+      getDocs(collection(db, 'commissions')).then((snap) => {
+        const list: Array<{ id: string; amount: number; referredName?: string; referredEmail?: string; referredUid?: string }> = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.referrerUid === user.uid) {
+            list.push({
+              id: d.id,
+              amount: Number(data.commissionAmount || 0),
+              referredName: data.referredName || '',
+              referredEmail: data.referredEmail || '',
+              referredUid: data.referredUid || ''
+            });
+          }
+        });
+        setUserCommissions(list);
+      }).catch(() => {});
+    });
+
     return () => {
       unsubTx();
       unsubW();
+      unsubComm();
     };
   }, [user?.uid, user?.email]);
 
@@ -1211,8 +1280,9 @@ export default function Home() {
     ? (lastWithdrawal.requestedAt?.toMillis ? lastWithdrawal.requestedAt.toMillis() : (lastWithdrawal.requestedAt?.seconds ? lastWithdrawal.requestedAt.seconds * 1000 : (lastWithdrawal.requestedAt ? new Date(lastWithdrawal.requestedAt).getTime() : 0)))
     : 0;
 
-  const timeSinceLastWithdrawal = Date.now() - lastWithdrawalTime;
-  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
+  const effectiveNow = nowTimestamp || 0;
+  const timeSinceLastWithdrawal = effectiveNow > 0 && lastWithdrawalTime > 0 ? effectiveNow - lastWithdrawalTime : 0;
+  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && effectiveNow > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
   const remainingCooldownMs = isWithdrawalCooldownActive ? THREE_DAYS_MS - timeSinceLastWithdrawal : 0;
 
   const getCooldownLabel = (ms: number) => {
@@ -3359,20 +3429,86 @@ export default function Home() {
                     </div>
                   </div>
 
-                {/* Metrics */}
+                {/* Metrics de Convidados Ativos (Apenas com 1º depósito) & Comissões Ganhas */}
                 <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/15">
                   <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
-                    <p className="text-[10px] uppercase font-bold text-blue-200">Convidados Registados</p>
-                    <p className="text-lg font-black text-white mt-0.5">
-                      {userProfile?.indicadosCount || 0}
+                    <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                      <span>Convidados com 1º Depósito</span>
+                    </div>
+                    <p className="text-2xl font-black text-white mt-1">
+                      {activeDepositedInvitedCount}
+                    </p>
+                    <p className="text-[10px] text-blue-200/80 mt-0.5 leading-tight">
+                      Apenas quem já efetuou depósito
                     </p>
                   </div>
                   <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
-                    <p className="text-[10px] uppercase font-bold text-blue-200">Comissões Recebidas</p>
-                    <p className="text-lg font-black text-amber-300 mt-0.5">
-                      {formatMT(userProfile?.totalComissoes || 0)}
+                    <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
+                      <Coins className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                      <span>Comissões Recebidas</span>
+                    </div>
+                    <p className="text-2xl font-black text-amber-300 mt-1">
+                      {formatMT(totalCommissionsEarned)}
+                    </p>
+                    <p className="text-[10px] text-blue-200/80 mt-0.5 leading-tight">
+                      5% creditado no saldo disponível
                     </p>
                   </div>
+                </div>
+
+                {/* Programa de Afiliados TapRise: +20 Convidados Ativos = Salário Semanal */}
+                <div className="p-4 bg-gradient-to-br from-amber-500/25 via-yellow-500/20 to-amber-600/30 border border-amber-400/50 rounded-2xl text-white space-y-2.5 backdrop-blur-xs shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 rounded-xl shadow-xs">
+                        <Award className="w-4 h-4 font-black" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wider text-amber-300">Programa de Afiliados Oficiais</p>
+                        <p className="text-[11px] text-slate-200 font-medium">+20 Convidados Ativos = Salário Semanal</p>
+                      </div>
+                    </div>
+                    {activeDepositedInvitedCount >= 20 ? (
+                      <span className="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-black uppercase rounded-full tracking-wider animate-pulse shadow-xs">
+                        Afiliado Oficial Ativo
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 bg-white/20 text-amber-200 text-[10px] font-mono font-bold rounded-lg border border-white/10">
+                        {activeDepositedInvitedCount}/20
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-slate-100 leading-relaxed">
+                    O investidor que alcançar <strong>+20 convidados ativos com primeiro depósito</strong> torna-se automaticamente um <strong>Afiliado Oficial TapRise</strong>, com direito garantido a um <strong>Salário Semanal</strong> fixo pago pela Administração, além das comissões contínuas de 5% sobre cada indicação!
+                  </p>
+
+                  {/* Barra de Progresso */}
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex justify-between text-[10px] font-bold">
+                      <span className="text-amber-200">Progresso de Elegibilidade:</span>
+                      <span className="text-white font-mono">{Math.min(20, activeDepositedInvitedCount)} de 20 convidados ativos</span>
+                    </div>
+                    <div className="w-full bg-black/40 h-2.5 rounded-full overflow-hidden p-0.5 border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-400 to-yellow-300 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, (activeDepositedInvitedCount / 20) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {activeDepositedInvitedCount >= 20 ? (
+                    <div className="p-2.5 bg-emerald-500/25 border border-emerald-400/60 rounded-xl text-[11px] text-emerald-200 font-bold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Parabéns! Você atingiu a meta de +20 convidados ativos e tem direito ao Salário Semanal da Administração.</span>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-amber-200/90 flex items-center gap-1.5 pt-0.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                      <span>Faltam <strong>{Math.max(0, 20 - activeDepositedInvitedCount)} convidados com depósito</strong> para desbloquear o Salário Semanal de Afiliado.</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

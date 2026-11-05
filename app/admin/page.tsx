@@ -1141,6 +1141,7 @@ export default function AdminPage() {
                 saldoVirtual: increment(commissionAmount),
                 patrimonioTotal: increment(commissionAmount),
                 totalComissoes: increment(commissionAmount),
+                indicadosCount: increment(1),
                 atualizadoEm: serverTimestamp()
               });
 
@@ -1149,7 +1150,9 @@ export default function AdminPage() {
                 const refUsuarioDoc = doc(db, 'usuarios', referrerUid);
                 await updateDoc(refUsuarioDoc, {
                   saldoDisponivel: increment(commissionAmount),
-                  saldoTotal: increment(commissionAmount)
+                  saldoTotal: increment(commissionAmount),
+                  totalComissoes: increment(commissionAmount),
+                  indicadosCount: increment(1)
                 });
               } catch {}
 
@@ -1274,7 +1277,9 @@ export default function AdminPage() {
       try {
         await updateDoc(doc(db, 'usuarios', effectiveReferrerUid), {
           saldoDisponivel: increment(commissionAmount),
-          saldoTotal: increment(commissionAmount)
+          saldoTotal: increment(commissionAmount),
+          totalComissoes: increment(commissionAmount),
+          indicadosCount: increment(1)
         });
       } catch {}
 
@@ -1434,6 +1439,7 @@ export default function AdminPage() {
                 saldoVirtual: increment(commissionAmount),
                 patrimonioTotal: increment(commissionAmount),
                 totalComissoes: increment(commissionAmount),
+                indicadosCount: increment(1),
                 atualizadoEm: serverTimestamp()
               });
 

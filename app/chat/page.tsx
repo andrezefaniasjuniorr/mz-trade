@@ -838,8 +838,8 @@ export default function ChatPage() {
   const privateEndRef = useRef<HTMLDivElement | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const privateContainerRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const privateInputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const privateInputRef = useRef<HTMLTextAreaElement | null>(null);
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialMountRef = useRef<boolean>(true);
 
@@ -1350,6 +1350,9 @@ export default function ChatPage() {
 
         setMessages((prev) => [...prev, optimisticMsg]);
         setInputText('');
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+        }
         setPendingImage(null);
         setReplyingTo(null);
 
@@ -1409,6 +1412,9 @@ export default function ChatPage() {
         });
 
         setInputText('');
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+        }
         setReplyingTo(null);
       }
 
@@ -1471,6 +1477,9 @@ export default function ChatPage() {
 
         setPrivateMessages((prev) => [...prev, optimisticMsg]);
         setPrivateInputText('');
+        if (privateInputRef.current) {
+          privateInputRef.current.style.height = 'auto';
+        }
         setPendingImage(null);
 
         setTimeout(() => {
@@ -1494,6 +1503,9 @@ export default function ChatPage() {
         }
       } else {
         setPrivateInputText('');
+        if (privateInputRef.current) {
+          privateInputRef.current.style.height = 'auto';
+        }
       }
 
       // 1. Salvar na subcoleção `private_chats/{targetUid}/messages`
@@ -1928,135 +1940,148 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* Preview de Resposta Ativa */}
-          <AnimatePresence>
-            {replyingTo && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="bg-slate-900 border-t border-slate-800 px-4 py-2 flex items-center justify-between text-xs text-slate-300 shrink-0 z-20"
-              >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <Reply className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                  <span className="font-bold text-blue-400">Respondendo a {replyingTo.displayName}:</span>
-                  <span className="text-slate-400 truncate max-w-[200px] sm:max-w-md">{replyingTo.text || '📷 Imagem'}</span>
-                </div>
-                <button
-                  onClick={() => setReplyingTo(null)}
-                  className="p-1 hover:text-white text-slate-400 cursor-pointer"
-                  title="Cancelar resposta"
+          {/* Input do Grupo com Ícone [📷] à esquerda + Preview Acoplado + Textarea estilo WhatsApp */}
+          <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 z-40 shadow-2xl" style={{ backgroundColor: '#0f172a' }}>
+            {/* Preview de Resposta Ativa */}
+            <AnimatePresence>
+              {replyingTo && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs text-slate-300 shrink-0"
                 >
-                  <X className="w-4 h-4" />
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <Reply className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="font-bold text-blue-400">Respondendo a {replyingTo.displayName}:</span>
+                    <span className="text-slate-400 truncate max-w-[200px] sm:max-w-md">{replyingTo.text || '📷 Imagem'}</span>
+                  </div>
+                  <button
+                    onClick={() => setReplyingTo(null)}
+                    className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                    title="Cancelar resposta"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-          {/* Preview de Edição de Mensagem */}
-          <AnimatePresence>
-            {editingMessage && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="bg-amber-950/60 border-t border-amber-800/80 px-4 py-2 flex items-center justify-between text-xs text-amber-200 shrink-0 z-20"
-              >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <Pencil className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="font-bold text-amber-400">A editar mensagem:</span>
-                  <span className="text-slate-300 truncate max-w-[200px] sm:max-w-md">{editingMessage.text}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingMessage(null);
-                    setInputText('');
-                  }}
-                  className="p-1 hover:text-white text-slate-400 cursor-pointer"
-                  title="Cancelar edição"
+            {/* Preview de Edição de Mensagem */}
+            <AnimatePresence>
+              {editingMessage && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 flex items-center justify-between text-xs text-amber-200 shrink-0"
                 >
-                  <X className="w-4 h-4" />
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Preview de Imagem selecionada antes de enviar (com botão X de cancelar) */}
-          <AnimatePresence>
-            {pendingImage && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                className="bg-slate-900 border-t border-slate-800 p-3 flex items-center space-x-3 shrink-0 z-20"
-              >
-                <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black">
-                  <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <Pencil className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="font-bold text-amber-400">A editar mensagem:</span>
+                    <span className="text-slate-300 truncate max-w-[200px] sm:max-w-md">{editingMessage.text}</span>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setPendingImage(null)}
-                    className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition"
+                    onClick={() => {
+                      setEditingMessage(null);
+                      setInputText('');
+                      if (inputRef.current) inputRef.current.style.height = 'auto';
+                    }}
+                    className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                    title="Cancelar edição"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-4 h-4" />
                   </button>
-                </div>
-                <div className="flex-1 text-xs text-slate-300">
-                  <p className="font-bold text-white flex items-center gap-1.5">
-                    <Camera className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Foto pronta para envio</span>
-                  </p>
-                  <p className="text-[11px] text-slate-400">Legenda opcional abaixo ou envie imediatamente.</p>
-                </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Preview de Imagem selecionada antes de enviar (DIRETAMENTE POR CIMA DA BARRA DE ESCREVER) */}
+            <AnimatePresence>
+              {pendingImage && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="bg-slate-900 border-b border-slate-800 p-3 flex items-center space-x-3 shrink-0"
+                >
+                  <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black shadow-md">
+                    <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setPendingImage(null)}
+                      className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition cursor-pointer"
+                      title="Cancelar foto"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex-1 text-xs text-slate-300 min-w-0">
+                    <p className="font-bold text-white flex items-center gap-1.5 truncate">
+                      <Camera className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      <span>Foto pronta para envio</span>
+                    </p>
+                    <p className="text-[11px] text-slate-400 truncate">Escreva uma legenda abaixo ou envie diretamente.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSendMessage(e as any)}
+                    disabled={isSending}
+                    className="px-3.5 py-2 bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Enviar Foto</span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="p-3 sm:p-4">
+              <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
+                
+                {/* Botão [📷] para abrir file picker */}
                 <button
                   type="button"
-                  onClick={(e) => handleSendMessage(e as any)}
-                  disabled={isSending}
-                  className="px-3.5 py-2 bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                  onClick={() => groupFilePickerRef.current?.click()}
+                  className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
+                  title="Enviar foto (JPG, PNG, WebP máx 3MB)"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Enviar Foto</span>
+                  <Camera className="w-5 h-5 text-blue-400" />
                 </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
-          {/* Input do Grupo com Ícone [📷] à esquerda + Botão Enviar */}
-          <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 p-3 sm:p-4 z-40" style={{ backgroundColor: '#0f172a' }}>
-            <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-center space-x-2">
-              
-              {/* Botão [📷] para abrir file picker */}
-              <button
-                type="button"
-                onClick={() => groupFilePickerRef.current?.click()}
-                className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0"
-                title="Enviar foto (JPG, PNG, WebP máx 3MB)"
-              >
-                <Camera className="w-5 h-5 text-blue-400" />
-              </button>
-
-              <div className="flex-1 relative">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder={
-                    editingMessage
-                      ? 'Edite a sua mensagem...'
-                      : pendingImage
-                      ? 'Adicione uma legenda à foto...'
-                      : 'Escreva uma mensagem para o Grupo TapRise...'
-                  }
-                  maxLength={500}
-                  className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition"
-                />
-                {inputText.length > 400 && (
-                  <span className="absolute right-3 top-3 text-[10px] font-mono text-amber-400">
-                    {500 - inputText.length}
-                  </span>
-                )}
-              </div>
+                <div className="flex-1 relative flex items-center">
+                  <textarea
+                    ref={inputRef}
+                    rows={1}
+                    value={inputText}
+                    onChange={(e) => {
+                      setInputText(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(e as any);
+                      }
+                    }}
+                    placeholder={
+                      editingMessage
+                        ? 'Edite a sua mensagem...'
+                        : pendingImage
+                        ? 'Adicione uma legenda à foto...'
+                        : 'Escreva uma mensagem para o Grupo TapRise...'
+                    }
+                    maxLength={500}
+                    className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
+                  />
+                  {inputText.length > 400 && (
+                    <span className="absolute right-3 bottom-3 text-[10px] font-mono text-amber-400 pointer-events-none">
+                      {500 - inputText.length}
+                    </span>
+                  )}
+                </div>
 
               <button
                 type="submit"
@@ -2089,7 +2114,8 @@ export default function ChatPage() {
                   </>
                 )}
               </button>
-            </form>
+              </form>
+            </div>
           </footer>
         </div>
       )}
@@ -2250,84 +2276,103 @@ export default function ChatPage() {
               <div ref={privateEndRef} className="h-2" />
             </div>
 
-            {/* Preview de imagem no chat privado */}
-            <AnimatePresence>
-              {pendingImage && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="bg-slate-900 border-t border-slate-800 p-3 flex items-center space-x-3 shrink-0"
-                >
-                  <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black">
-                    <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+            {/* Input do Chat Privado com Câmera e Preview Acoplado */}
+            <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 z-40 shadow-2xl" style={{ backgroundColor: '#0f172a' }}>
+              {/* Preview de imagem no chat privado (DIRETAMENTE POR CIMA DA BARRA DE ESCREVER) */}
+              <AnimatePresence>
+                {pendingImage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="bg-slate-900 border-b border-slate-800 p-3 flex items-center space-x-3 shrink-0"
+                  >
+                    <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black shadow-md">
+                      <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setPendingImage(null)}
+                        className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition cursor-pointer"
+                        title="Cancelar foto"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex-1 text-xs text-slate-300 min-w-0">
+                      <p className="font-bold text-white flex items-center gap-1.5 truncate">
+                        <Camera className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Foto pronta para envio privado</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">Escreva uma nota abaixo ou envie diretamente.</p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setPendingImage(null)}
-                      className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition"
+                      onClick={(e) => handleSendPrivateMessage(e as any)}
+                      disabled={isSendingPrivate}
+                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
                     >
-                      <X className="w-3 h-3" />
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar Foto</span>
                     </button>
-                  </div>
-                  <div className="flex-1 text-xs text-slate-300">
-                    <p className="font-bold text-white flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Foto pronta para envio privado</span>
-                    </p>
-                    <p className="text-[11px] text-slate-400">Nota opcional abaixo ou envie diretamente.</p>
-                  </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="p-3 sm:p-4">
+                <form onSubmit={handleSendPrivateMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
                   <button
                     type="button"
-                    onClick={(e) => handleSendPrivateMessage(e as any)}
-                    disabled={isSendingPrivate}
-                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                    onClick={() => privateFilePickerRef.current?.click()}
+                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
+                    title="Enviar foto para o Admin (máx 3MB)"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Enviar Foto</span>
+                    <Camera className="w-5 h-5 text-amber-400" />
                   </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
-            {/* Input do Chat Privado com Câmera */}
-            <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 p-3 sm:p-4 z-40" style={{ backgroundColor: '#0f172a' }}>
-              <form onSubmit={handleSendPrivateMessage} className="max-w-5xl mx-auto flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => privateFilePickerRef.current?.click()}
-                  className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0"
-                  title="Enviar foto para o Admin (máx 3MB)"
-                >
-                  <Camera className="w-5 h-5 text-amber-400" />
-                </button>
+                  <div className="flex-1 relative flex items-center">
+                    <textarea
+                      ref={privateInputRef}
+                      rows={1}
+                      value={privateInputText}
+                      onChange={(e) => {
+                        setPrivateInputText(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendPrivateMessage(e as any);
+                        }
+                      }}
+                      placeholder={
+                        pendingImage
+                          ? 'Adicione uma nota à foto...'
+                          : isAdmin
+                          ? 'Responder ao investidor...'
+                          : 'Mensagem privada para o Admin...'
+                      }
+                      maxLength={600}
+                      className="w-full pl-4 pr-10 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
+                    />
+                  </div>
 
-                <div className="flex-1 relative">
-                  <input
-                    ref={privateInputRef}
-                    type="text"
-                    value={privateInputText}
-                    onChange={(e) => setPrivateInputText(e.target.value)}
-                    placeholder={isAdmin ? "Responder ao investidor..." : "Mensagem privada para o Admin..."}
-                    maxLength={600}
-                    className="w-full pl-4 pr-10 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={(!privateInputText.trim() && !pendingImage) || isSendingPrivate}
-                  className="px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {isSendingPrivate ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                  ) : (
-                    <>
-                      <Send className="w-4 h-4" />
-                      <span className="hidden sm:inline">Enviar</span>
-                    </>
-                  )}
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={(!privateInputText.trim() && !pendingImage) || isSendingPrivate}
+                    className="px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mb-0.5"
+                  >
+                    {isSendingPrivate ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span className="hidden sm:inline">Enviar</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
             </footer>
 
           </div>

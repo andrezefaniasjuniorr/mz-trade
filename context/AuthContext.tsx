@@ -276,6 +276,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   balance: latestBalance,
                   patrimonioTotal: typeof data.patrimonioTotal === 'number' ? data.patrimonioTotal : latestBalance,
                   lastClaimDate: data.lastClaimDate || prev?.lastClaimDate || '',
+                  inviteCode: data.inviteCode || prev?.inviteCode || '',
+                  invitedBy: data.invitedBy || prev?.invitedBy || '',
+                  invitedByCode: data.invitedByCode || prev?.invitedByCode || '',
+                  commissionPaid: typeof data.commissionPaid === 'boolean' ? data.commissionPaid : (prev?.commissionPaid || false),
+                  totalComissoes: typeof data.totalComissoes === 'number' ? data.totalComissoes : (prev?.totalComissoes || 0),
+                  indicadosCount: typeof data.indicadosCount === 'number' ? data.indicadosCount : (prev?.indicadosCount || 0),
                   criadoEm: data.criadoEm || prev?.criadoEm,
                   atualizadoEm: data.atualizadoEm || prev?.atualizadoEm
                 };
