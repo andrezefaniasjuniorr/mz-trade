@@ -103,9 +103,9 @@ export function playMessageSound() {
 }
 
 /**
- * Compresses an image in the browser using HTML5 Canvas.
- * Resize maintaining aspect ratio to max 850px and compresses to JPEG (quality 0.72)
- * for sub-second delivery over Mozambique mobile data networks.
+ * Compresses an image in the browser ultra-fast using HTML5 Canvas & createObjectURL.
+ * Resizes to max 800px and compresses to JPEG (quality 0.68, ~25-40KB)
+ * for instant delivery across mobile connections without blocking the UI.
  */
 export async function compressChatImage(file: File): Promise<{
   blob: Blob;
@@ -114,75 +114,110 @@ export async function compressChatImage(file: File): Promise<{
   height: number;
 }> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Falha ao ler ficheiro de imagem'));
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      const img = new Image();
-      img.onerror = () => reject(new Error('Ficheiro de imagem inválido'));
-      img.onload = () => {
-        const MAX_DIM = 850;
-        let width = img.width;
-        let height = img.height;
+    const hardTimeout = setTimeout(() => {
+      reject(new Error('Tempo limite excedido ao processar imagem'));
+    }, 2500);
 
-        if (width > MAX_DIM || height > MAX_DIM) {
-          if (width > height) {
-            height = Math.round((height * MAX_DIM) / width);
-            width = MAX_DIM;
-          } else {
-            width = Math.round((width * MAX_DIM) / height);
-            height = MAX_DIM;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Canvas 2D context não suportado'));
-          return;
-        }
-
-        // Draw image smoothly
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Export as JPEG with 0.72 quality for ultra-fast transfer (typically 25-50KB)
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve({
-                blob,
-                dataUrl: compressedDataUrl,
-                width,
-                height
-              });
-            } else {
-              // Fallback
-              fetch(compressedDataUrl)
-                .then((r) => r.blob())
-                .then((b) => resolve({ blob: b, dataUrl: compressedDataUrl, width, height }))
-                .catch(() => reject(new Error('Falha ao converter canvas para blob')));
-            }
-          },
-          'image/jpeg',
-          0.72
-        );
+    let objectUrl = '';
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch {
+      // Fallback to FileReader if createObjectURL fails
+      const reader = new FileReader();
+      reader.onload = () => {
+        processImgSrc(reader.result as string, null);
       };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+      reader.onerror = () => {
+        clearTimeout(hardTimeout);
+        reject(new Error('Falha ao ler ficheiro'));
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    processImgSrc(objectUrl, objectUrl);
+
+    function processImgSrc(src: string, urlToRevoke: string | null) {
+      const img = new Image();
+      img.onload = () => {
+        clearTimeout(hardTimeout);
+        if (urlToRevoke) {
+          try { URL.revokeObjectURL(urlToRevoke); } catch {}
+        }
+
+        try {
+          const MAX_DIM = 800;
+          let width = img.naturalWidth || img.width || 600;
+          let height = img.naturalHeight || img.height || 400;
+
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Canvas não suportado'));
+            return;
+          }
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'medium';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.68);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve({
+                  blob,
+                  dataUrl: compressedDataUrl,
+                  width,
+                  height
+                });
+              } else {
+                resolve({
+                  blob: file,
+                  dataUrl: compressedDataUrl,
+                  width,
+                  height
+                });
+              }
+            },
+            'image/jpeg',
+            0.68
+          );
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(hardTimeout);
+        if (urlToRevoke) {
+          try { URL.revokeObjectURL(urlToRevoke); } catch {}
+        }
+        reject(new Error('Ficheiro de imagem não suportado'));
+      };
+
+      img.src = src;
+    }
   });
 }
 
 /**
- * Upload image with progress tracking and aggressive sub-second fallback.
- * If Firebase Storage is delayed or CORS-blocked, instantly resolves to the
- * high-definition compressed image so the chat NEVER gets stuck 'a processar'.
+ * Upload image with progress tracking and instant 1.2-second fallback.
+ * If Firebase Storage is delayed, throttled, or CORS-blocked, instantly resolves to the
+ * lightweight compressed image (~30KB) so the chat NEVER gets stuck 'a processar'.
  */
 export async function uploadImageWithProgress(
   blob: Blob,
@@ -190,12 +225,11 @@ export async function uploadImageWithProgress(
   onProgress?: (progress: number) => void,
   fallbackDataUrl?: string
 ): Promise<string> {
+  if (onProgress) onProgress(30);
+
   // If no storage is available, use fallback immediately
   if (!storage && fallbackDataUrl) {
-    if (onProgress) {
-      onProgress(50);
-      setTimeout(() => onProgress(100), 100);
-    }
+    if (onProgress) onProgress(100);
     return fallbackDataUrl;
   }
 
@@ -210,12 +244,12 @@ export async function uploadImageWithProgress(
       uploadTask.on(
         'state_changed',
         (snapshot) => {
-          if (snapshot.totalBytes > 0) {
+          if (snapshot.totalBytes > 0 && onProgress) {
             const progress = Math.min(
               95,
               Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
             );
-            if (onProgress) onProgress(progress);
+            onProgress(progress);
           }
         },
         (error) => {
@@ -241,8 +275,8 @@ export async function uploadImageWithProgress(
       );
     });
 
-    // 2-second timeout safety guard: if Firebase Storage is hanging/slow,
-    // immediately complete with compressed dataUrl to guarantee 0-second perceived latency!
+    // 1.2-second timeout safety guard: if Firebase Storage is slow,
+    // immediately complete with compressed dataUrl to guarantee near-instant delivery!
     if (fallbackDataUrl) {
       const timeoutPromise = new Promise<string>((resolve) => {
         setTimeout(() => {
@@ -251,7 +285,7 @@ export async function uploadImageWithProgress(
           } catch {}
           if (onProgress) onProgress(100);
           resolve(fallbackDataUrl);
-        }, 2000);
+        }, 1200);
       });
 
       return await Promise.race([storagePromise, timeoutPromise]);

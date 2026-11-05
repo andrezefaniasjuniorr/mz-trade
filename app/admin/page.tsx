@@ -108,6 +108,9 @@ interface UserRecord {
   commissionPaid?: boolean;
   totalComissoes?: number;
   indicadosCount?: number;
+  hasDeposited?: boolean;
+  totalDeposits?: number;
+  primeiroDepositoEm?: any;
 }
 
 interface CommodityConfig {
@@ -316,7 +319,14 @@ export default function AdminPage() {
           nome: inMem.nome || inMem.email || 'Investidor Indicador',
           email: inMem.email || '',
           code: invCode || inMem.inviteCode || invUid.slice(0, 8),
-          balance: inMem.balance ?? inMem.saldoVirtual ?? 0
+          balance: inMem.balance ?? inMem.saldoVirtual ?? 0,
+          hasDeposited: Boolean(
+            inMem.hasDeposited ||
+            (inMem.totalDeposits && inMem.totalDeposits > 0) ||
+            inMem.primeiroDepositoEm ||
+            (inMem.ultimoCreditoEm && (inMem.balance || 0) > 0) ||
+            ((inMem.balance || inMem.saldoVirtual || 0) > 0 && inMem.status === 'ativo')
+          )
         };
       }
     }
@@ -341,7 +351,14 @@ export default function AdminPage() {
           nome: inMemByCode.nome || inMemByCode.email || 'Investidor Indicador',
           email: inMemByCode.email || '',
           code: invCode || inMemByCode.inviteCode || inMemByCode.id.slice(0, 8),
-          balance: inMemByCode.balance ?? inMemByCode.saldoVirtual ?? 0
+          balance: inMemByCode.balance ?? inMemByCode.saldoVirtual ?? 0,
+          hasDeposited: Boolean(
+            inMemByCode.hasDeposited ||
+            (inMemByCode.totalDeposits && inMemByCode.totalDeposits > 0) ||
+            inMemByCode.primeiroDepositoEm ||
+            (inMemByCode.ultimoCreditoEm && (inMemByCode.balance || 0) > 0) ||
+            ((inMemByCode.balance || inMemByCode.saldoVirtual || 0) > 0 && inMemByCode.status === 'ativo')
+          )
         };
       }
     }
@@ -355,6 +372,7 @@ export default function AdminPage() {
     email: string;
     code: string;
     balance?: number;
+    hasDeposited?: boolean;
   } | null>(null);
 
   const targetInvitedBy = selectedUserForCredit?.invitedBy || referrerFromList?.id;
@@ -377,14 +395,22 @@ export default function AdminPage() {
             nome: d.nome || d.displayName || d.email || 'Investidor Indicador',
             email: d.email || '',
             code: invCode || d.inviteCode || targetInvitedBy.slice(0, 8),
-            balance: d.balance ?? d.saldoVirtual ?? 0
+            balance: d.balance ?? d.saldoVirtual ?? 0,
+            hasDeposited: Boolean(
+              d.hasDeposited ||
+              (d.totalDeposits && d.totalDeposits > 0) ||
+              d.primeiroDepositoEm ||
+              (d.ultimoCreditoEm && (d.balance || 0) > 0) ||
+              ((d.balance || d.saldoVirtual || 0) > 0 && d.status === 'ativo')
+            )
           });
         } else {
           setFetchedReferrer({
             id: targetInvitedBy,
             nome: 'Indicador TapRise',
             email: '',
-            code: invCode
+            code: invCode,
+            hasDeposited: false
           });
         }
       })
@@ -394,7 +420,8 @@ export default function AdminPage() {
             id: targetInvitedBy,
             nome: 'Indicador TapRise',
             email: '',
-            code: invCode
+            code: invCode,
+            hasDeposited: false
           });
         }
       });
@@ -483,7 +510,10 @@ export default function AdminPage() {
           invitedByCode: d.invitedByCode,
           commissionPaid: !!d.commissionPaid,
           totalComissoes: d.totalComissoes || 0,
-          indicadosCount: d.indicadosCount || 0
+          indicadosCount: d.indicadosCount || 0,
+          hasDeposited: d.hasDeposited !== undefined ? !!d.hasDeposited : (d.totalDeposits > 0 || !!d.primeiroDepositoEm || (!!d.ultimoCreditoEm && saldoDisp > 0)),
+          totalDeposits: d.totalDeposits || 0,
+          primeiroDepositoEm: d.primeiroDepositoEm
         });
       });
       users.sort((a, b) => {
@@ -534,7 +564,10 @@ export default function AdminPage() {
               invitedByCode: d.invitedByCode || existing?.invitedByCode,
               commissionPaid: d.commissionPaid !== undefined ? !!d.commissionPaid : existing?.commissionPaid,
               totalComissoes: d.totalComissoes || existing?.totalComissoes || 0,
-              indicadosCount: d.indicadosCount || existing?.indicadosCount || 0
+              indicadosCount: d.indicadosCount || existing?.indicadosCount || 0,
+              hasDeposited: d.hasDeposited !== undefined ? !!d.hasDeposited : (existing?.hasDeposited ?? (d.totalDeposits > 0 || !!d.primeiroDepositoEm || (!!d.ultimoCreditoEm && saldoDisp > 0))),
+              totalDeposits: d.totalDeposits || existing?.totalDeposits || 0,
+              primeiroDepositoEm: d.primeiroDepositoEm || existing?.primeiroDepositoEm
             });
           });
           const merged = Array.from(map.values());
@@ -1032,6 +1065,8 @@ export default function AdminPage() {
         saldoDisponivel: increment(amountNum),
         saldoTotal: increment(amountNum),
         status: 'ativo',
+        hasDeposited: true,
+        totalDeposits: increment(amountNum),
         ultimoCreditoEm: serverTimestamp()
       }, { merge: true });
 
@@ -1044,6 +1079,8 @@ export default function AdminPage() {
         balance: increment(amountNum),
         patrimonioTotal: increment(amountNum),
         status: 'ativo',
+        hasDeposited: true,
+        totalDeposits: increment(amountNum),
         ultimoCreditoEm: serverTimestamp(),
         atualizadoEm: serverTimestamp()
       }, { merge: true });
@@ -1063,78 +1100,105 @@ export default function AdminPage() {
         description: `Crédito de saldo (+${amountNum.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT) pelo Administrador`
       });
 
-      // 4. REQUISITO 3: Pagar 5% de comissão ao indicador se for o 1º crédito e tiver indicador
+      // 4. REQUISITO: Pagar 5% de comissão ao indicador SE e SOMENTE SE o indicador já tiver efetuado o 1º depósito
       const effectiveReferrerUid = selectedUserForCredit.invitedBy || referrerDetails?.id || manualReferrerUid;
       if (effectiveReferrerUid && !selectedUserForCredit.commissionPaid && effectiveReferrerUid !== targetUserId) {
         const referrerUid = effectiveReferrerUid;
-        const commissionAmount = Number((amountNum * 0.05).toFixed(2));
+        const refInMem = usersList.find(u => u.id === referrerUid);
+        const referrerHasDeposited = Boolean(
+          referrerDetails?.hasDeposited ||
+          refInMem?.hasDeposited ||
+          (refInMem?.totalDeposits && refInMem.totalDeposits > 0) ||
+          refInMem?.primeiroDepositoEm ||
+          (refInMem?.ultimoCreditoEm && (refInMem.balance || 0) > 0) ||
+          ((refInMem?.balance || 0) > 0 && refInMem?.status === 'ativo')
+        );
 
-        if (commissionAmount > 0) {
+        if (!referrerHasDeposited) {
+          // Indicador ainda não realizou depósito: REGRA DETERMINA QUE NÃO RECEBE
+          await updateDoc(userRef, {
+            invitedBy: referrerUid,
+            commissionPaid: false,
+            commissionIneligibleReason: 'Indicador ainda não realizou o 1º depósito'
+          });
           try {
-            // A. Creditar saldo do indicador em users/{invitedBy}
-            const referrerRef = doc(db, 'users', referrerUid);
-            await updateDoc(referrerRef, {
-              balance: increment(commissionAmount),
-              saldoVirtual: increment(commissionAmount),
-              patrimonioTotal: increment(commissionAmount),
-              totalComissoes: increment(commissionAmount),
-              atualizadoEm: serverTimestamp()
-            });
-
-            // B. Também atualizar usuarios/{invitedBy} para compatibilidade
-            try {
-              const refUsuarioDoc = doc(db, 'usuarios', referrerUid);
-              await updateDoc(refUsuarioDoc, {
-                saldoDisponivel: increment(commissionAmount),
-                saldoTotal: increment(commissionAmount)
-              });
-            } catch {}
-
-            // C. Registar na coleção 'commissions'
-            await addDoc(collection(db, 'commissions'), {
-              referrerUid: referrerUid,
-              referredUid: targetUserId,
-              referredName: selectedUserForCredit.nome || 'Investidor Convidado',
-              referredEmail: selectedUserForCredit.email || '',
-              creditAmount: amountNum,
-              rate: 0.05,
-              commissionAmount: commissionAmount,
-              status: 'paid',
-              paidAt: serverTimestamp(),
-              description: `Bônus de convite de 5% sobre 1º crédito de ${amountNum.toFixed(2)} MT`
-            });
-
-            // D. Registar no histórico do indicador como "Bônus de convite"
-            await addDoc(collection(db, 'transactions'), {
-              userId: referrerUid,
-              uid: referrerUid,
-              userName: referrerDetails?.nome || 'Indicador TapRise',
-              userEmail: referrerDetails?.email || '',
-              type: 'bonus_convite',
-              amount: commissionAmount,
-              referredUserId: targetUserId,
-              referredUserName: selectedUserForCredit.nome || 'Investidor Convidado',
-              timestamp: serverTimestamp(),
-              description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${selectedUserForCredit.nome || 'convidado'}`
-            });
-
-            // E. Marcar commissionPaid = true para nunca pagar de novo a este usuário
-            await updateDoc(userRef, {
+            await updateDoc(usuarioRef, {
               invitedBy: referrerUid,
-              commissionPaid: true,
-              commissionPaidAt: serverTimestamp(),
-              commissionAmount: commissionAmount
+              commissionPaid: false
             });
-            try {
-              await updateDoc(usuarioRef, {
-                invitedBy: referrerUid,
-                commissionPaid: true
-              });
-            } catch {}
+          } catch {}
+          showToast(`Aviso de Convite: O indicador (${referrerDetails?.nome || 'Indicador'}) ainda não realizou o 1º depósito, logo NÃO é elegível para receber os 5%.`, 'info');
+        } else {
+          // Indicador elegível: paga os 5% de comissão
+          const commissionAmount = Number((amountNum * 0.05).toFixed(2));
 
-            showToast(`Bônus de convite de +${commissionAmount.toFixed(2)} MT (5%) pago com sucesso ao indicador!`, 'info');
-          } catch (commErr) {
-            console.warn('Erro ao processar comissão de convite:', commErr);
+          if (commissionAmount > 0) {
+            try {
+              // A. Creditar saldo do indicador em users/{invitedBy}
+              const referrerRef = doc(db, 'users', referrerUid);
+              await updateDoc(referrerRef, {
+                balance: increment(commissionAmount),
+                saldoVirtual: increment(commissionAmount),
+                patrimonioTotal: increment(commissionAmount),
+                totalComissoes: increment(commissionAmount),
+                atualizadoEm: serverTimestamp()
+              });
+
+              // B. Também atualizar usuarios/{invitedBy} para compatibilidade
+              try {
+                const refUsuarioDoc = doc(db, 'usuarios', referrerUid);
+                await updateDoc(refUsuarioDoc, {
+                  saldoDisponivel: increment(commissionAmount),
+                  saldoTotal: increment(commissionAmount)
+                });
+              } catch {}
+
+              // C. Registar na coleção 'commissions'
+              await addDoc(collection(db, 'commissions'), {
+                referrerUid: referrerUid,
+                referredUid: targetUserId,
+                referredName: selectedUserForCredit.nome || 'Investidor Convidado',
+                referredEmail: selectedUserForCredit.email || '',
+                creditAmount: amountNum,
+                rate: 0.05,
+                commissionAmount: commissionAmount,
+                status: 'paid',
+                paidAt: serverTimestamp(),
+                description: `Bónus de convite de 5% sobre 1º crédito de ${amountNum.toFixed(2)} MT`
+              });
+
+              // D. Registar no histórico do indicador como "Bônus de convite"
+              await addDoc(collection(db, 'transactions'), {
+                userId: referrerUid,
+                uid: referrerUid,
+                userName: referrerDetails?.nome || 'Indicador TapRise',
+                userEmail: referrerDetails?.email || '',
+                type: 'bonus_convite',
+                amount: commissionAmount,
+                referredUserId: targetUserId,
+                referredUserName: selectedUserForCredit.nome || 'Investidor Convidado',
+                timestamp: serverTimestamp(),
+                description: `Bónus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${selectedUserForCredit.nome || 'convidado'}`
+              });
+
+              // E. Marcar commissionPaid = true para nunca pagar de novo a este usuário
+              await updateDoc(userRef, {
+                invitedBy: referrerUid,
+                commissionPaid: true,
+                commissionPaidAt: serverTimestamp(),
+                commissionAmount: commissionAmount
+              });
+              try {
+                await updateDoc(usuarioRef, {
+                  invitedBy: referrerUid,
+                  commissionPaid: true
+                });
+              } catch {}
+
+              showToast(`Bónus de convite de +${commissionAmount.toFixed(2)} MT (5%) creditado com sucesso ao indicador elegível!`, 'info');
+            } catch (commErr) {
+              console.warn('Erro ao processar comissão de convite:', commErr);
+            }
           }
         }
       }
@@ -1169,6 +1233,21 @@ export default function AdminPage() {
 
     if (effectiveReferrerUid === targetUserId) {
       showToast('Não é permitido pagar bónus de convite a si mesmo.', 'error');
+      return;
+    }
+
+    const refInMem = usersList.find(u => u.id === effectiveReferrerUid);
+    const referrerHasDeposited = Boolean(
+      referrerDetails?.hasDeposited ||
+      refInMem?.hasDeposited ||
+      (refInMem?.totalDeposits && refInMem.totalDeposits > 0) ||
+      refInMem?.primeiroDepositoEm ||
+      (refInMem?.ultimoCreditoEm && (refInMem.balance || 0) > 0) ||
+      ((refInMem?.balance || 0) > 0 && refInMem?.status === 'ativo')
+    );
+
+    if (!referrerHasDeposited) {
+      showToast('Ação bloqueada: O indicador ainda não realizou o seu 1º depósito na plataforma. Só tem direito a receber 5% quem já tiver efetuado o 1º depósito.', 'error');
       return;
     }
 
@@ -1240,7 +1319,7 @@ export default function AdminPage() {
         referredUserId: targetUserId,
         referredUserName: selectedUserForCredit.nome || 'Investidor Convidado',
         timestamp: serverTimestamp(),
-        description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pela indicação de ${selectedUserForCredit.nome || selectedUserForCredit.email}`
+        description: `Bónus de convite (+5%): +${commissionAmount.toFixed(2)} MT pela indicação de ${selectedUserForCredit.nome || selectedUserForCredit.email}`
       });
 
       // 6. Atualizar estado local
@@ -1314,6 +1393,10 @@ export default function AdminPage() {
         saldoVirtual: newBalance,
         balance: newBalance,
         patrimonioTotal: newBalance,
+        hasDeposited: true,
+        totalDeposits: increment(amount),
+        status: 'ativo',
+        ultimoCreditoEm: serverTimestamp(),
         atualizadoEm: serverTimestamp()
       });
 
@@ -1330,52 +1413,63 @@ export default function AdminPage() {
         description: `Bónus manual rápido de +${amount} MT atribuído pelo Administrador`
       });
 
-      // Pagar 5% de comissão ao indicador se for 1º crédito
+      // Pagar 5% de comissão ao indicador se for 1º crédito E se o indicador já tiver feito depósito
       if (targetUser.invitedBy && !targetUser.commissionPaid) {
         const referrerUid = targetUser.invitedBy;
-        const commissionAmount = Number((amount * 0.05).toFixed(2));
-        if (commissionAmount > 0 && referrerUid !== targetUserId) {
-          try {
-            await updateDoc(doc(db, 'users', referrerUid), {
-              balance: increment(commissionAmount),
-              saldoVirtual: increment(commissionAmount),
-              patrimonioTotal: increment(commissionAmount),
-              totalComissoes: increment(commissionAmount),
-              atualizadoEm: serverTimestamp()
-            });
+        const refInMem = usersList.find(u => u.id === referrerUid);
+        const referrerHasDeposited = Boolean(
+          refInMem?.hasDeposited ||
+          (refInMem?.totalDeposits && refInMem.totalDeposits > 0) ||
+          refInMem?.primeiroDepositoEm ||
+          (refInMem?.ultimoCreditoEm && (refInMem.balance || 0) > 0) ||
+          ((refInMem?.balance || 0) > 0 && refInMem?.status === 'ativo')
+        );
 
-            await addDoc(collection(db, 'commissions'), {
-              referrerUid: referrerUid,
-              referredUid: targetUserId,
-              referredName: targetUser.nome || 'Investidor Convidado',
-              creditAmount: amount,
-              rate: 0.05,
-              commissionAmount: commissionAmount,
-              status: 'paid',
-              paidAt: serverTimestamp(),
-              description: `Bônus de convite de 5% sobre 1º crédito rápido de ${amount.toFixed(2)} MT`
-            });
+        if (referrerHasDeposited) {
+          const commissionAmount = Number((amount * 0.05).toFixed(2));
+          if (commissionAmount > 0 && referrerUid !== targetUserId) {
+            try {
+              await updateDoc(doc(db, 'users', referrerUid), {
+                balance: increment(commissionAmount),
+                saldoVirtual: increment(commissionAmount),
+                patrimonioTotal: increment(commissionAmount),
+                totalComissoes: increment(commissionAmount),
+                atualizadoEm: serverTimestamp()
+              });
 
-            await addDoc(collection(db, 'transactions'), {
-              userId: referrerUid,
-              uid: referrerUid,
-              userName: 'Indicador TapRise',
-              userEmail: '',
-              type: 'bonus_convite',
-              amount: commissionAmount,
-              referredUserId: targetUserId,
-              referredUserName: targetUser.nome || 'Investidor Convidado',
-              timestamp: serverTimestamp(),
-              description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${targetUser.nome || 'convidado'}`
-            });
+              await addDoc(collection(db, 'commissions'), {
+                referrerUid: referrerUid,
+                referredUid: targetUserId,
+                referredName: targetUser.nome || 'Investidor Convidado',
+                creditAmount: amount,
+                rate: 0.05,
+                commissionAmount: commissionAmount,
+                status: 'paid',
+                paidAt: serverTimestamp(),
+                description: `Bônus de convite de 5% sobre 1º crédito rápido de ${amount.toFixed(2)} MT`
+              });
 
-            await updateDoc(doc(db, 'users', targetUserId), {
-              commissionPaid: true,
-              commissionPaidAt: serverTimestamp(),
-              commissionAmount: commissionAmount
-            });
-          } catch (commErr) {
-            console.warn('Erro ao pagar comissão no crédito rápido:', commErr);
+              await addDoc(collection(db, 'transactions'), {
+                userId: referrerUid,
+                uid: referrerUid,
+                userName: 'Indicador TapRise',
+                userEmail: '',
+                type: 'bonus_convite',
+                amount: commissionAmount,
+                referredUserId: targetUserId,
+                referredUserName: targetUser.nome || 'Investidor Convidado',
+                timestamp: serverTimestamp(),
+                description: `Bônus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${targetUser.nome || 'convidado'}`
+              });
+
+              await updateDoc(doc(db, 'users', targetUserId), {
+                commissionPaid: true,
+                commissionPaidAt: serverTimestamp(),
+                commissionAmount: commissionAmount
+              });
+            } catch (errComm) {
+              console.warn('Erro ao processar comissão rápida:', errComm);
+            }
           }
         }
       }
@@ -2737,6 +2831,7 @@ export default function AdminPage() {
                 );
                 const calculatedBonus = Number((baseForBonus * 0.05).toFixed(2));
                 const isPaid = !!selectedUserForCredit.commissionPaid;
+                const isReferrerEligible = Boolean(activeReferrer?.hasDeposited);
 
                 return (
                   <div className="p-3.5 bg-gradient-to-br from-blue-950/70 to-indigo-950/70 border border-blue-500/40 rounded-2xl space-y-3 text-xs shadow-md max-w-full overflow-hidden">
@@ -2753,9 +2848,11 @@ export default function AdminPage() {
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
                         isPaid
                           ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : isReferrerEligible
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                       }`}>
-                        {isPaid ? '✓ Já Pago' : 'Pendente (5%)'}
+                        {isPaid ? '✓ Já Pago' : isReferrerEligible ? 'Pendente (5%)' : 'Sem 1º Depósito'}
                       </span>
                     </div>
 
@@ -2781,6 +2878,31 @@ export default function AdminPage() {
                           )}
                         </div>
                       </div>
+
+                      {/* Status de Elegibilidade do Indicador (Obrigatório ter 1º depósito) */}
+                      {activeReferrer && (
+                        <div className={`p-2 rounded-xl border flex items-center justify-between text-[11px] ${
+                          isReferrerEligible
+                            ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                            : 'bg-amber-950/40 border-amber-500/30 text-amber-300'
+                        }`}>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {isReferrerEligible ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            )}
+                            <span className="truncate font-semibold">
+                              {isReferrerEligible
+                                ? 'Indicador Elegível: Já realizou 1º depósito'
+                                : 'Indicador Inelegível: Ainda não fez 1º depósito'}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px] uppercase font-bold shrink-0 ml-1.5">
+                            {isReferrerEligible ? '5% Ativo' : '0% Sem Depósito'}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Seletor manual para associar ou alterar indicador */}
                       {(!activeReferrer || showManualReferralSelect) && (
@@ -2809,7 +2931,7 @@ export default function AdminPage() {
                               {usersList
                                 .filter((u) => u.id !== selectedUserForCredit.id)
                                 .map((u) => (
-                                  <option key={u.id} value={u.id}>
+                                  <option key={u.id} value={u.id} className="truncate">
                                     {u.nome || 'Investidor'} • {u.email} [{u.inviteCode || u.id.slice(0, 6)}]
                                   </option>
                                 ))}
@@ -2854,10 +2976,15 @@ export default function AdminPage() {
                               <button
                                 type="button"
                                 onClick={handlePay5PercentBonusDirectly}
-                                disabled={isPayingBonus}
-                                className="w-full py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 border border-emerald-400/40"
+                                disabled={isPayingBonus || !isReferrerEligible}
+                                className="w-full py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-400/40"
                               >
-                                {isPayingBonus ? (
+                                {!isReferrerEligible ? (
+                                  <>
+                                    <AlertCircle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                                    <span className="truncate">Indicador Inelegível (Sem 1º Depósito)</span>
+                                  </>
+                                ) : isPayingBonus ? (
                                   <>
                                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                                     <span>A creditar bónus...</span>

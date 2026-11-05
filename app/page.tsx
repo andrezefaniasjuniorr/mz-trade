@@ -758,6 +758,14 @@ export default function Home() {
   // Incremental ID generator ref for trades and positions to avoid impurity
   const counterRef = useRef(100);
 
+  // Client-side timestamp state to maintain pure render for cooldown timer
+  const [nowTimestamp, setNowTimestamp] = useState<number>(0);
+  useEffect(() => {
+    setNowTimestamp(Date.now());
+    const interval = setInterval(() => setNowTimestamp(Date.now()), 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Active selected commodity derived cleanly
   const selectedAsset = useMemo(() => {
     return commodities.find((c) => c.id === selectedAssetId) || commodities[0];
@@ -1187,12 +1195,35 @@ export default function Home() {
   // CARTEIRA & REGRAS DE RETIRADA
   // ------------------------------------------
   // ------------------------------------------
+  // ------------------------------------------
   // CARTEIRA & REGRAS DE RETIRADA
   // ------------------------------------------
   // Reserva mínima que SEMPRE deve sobrar na conta: 1.000,00 MT
   const reserveAmount = 1000.00;
-  // Saldo passível de levantamento considerando taxa de 5%: V * 1.05 <= balance - 1000
-  const withdrawableBalance = Math.max(0, Math.floor(((balance - reserveAmount) / 1.05) * 100) / 100);
+  // Saldo passível de levantamento considerando taxa de 5%: V * 1.05 <= balance - 1000, com teto máximo de 2.000 MT
+  const rawWithdrawable = Math.max(0, Math.floor(((balance - reserveAmount) / 1.05) * 100) / 100);
+  const withdrawableBalance = Math.min(2000, rawWithdrawable);
+
+  // Regra de Intervalo Obrigatório: 1 levantamento a cada 3 dias (72 horas)
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  const lastWithdrawal = userWithdrawals && userWithdrawals.length > 0 ? userWithdrawals[0] : null;
+  const lastWithdrawalTime = lastWithdrawal
+    ? (lastWithdrawal.requestedAt?.toMillis ? lastWithdrawal.requestedAt.toMillis() : (lastWithdrawal.requestedAt?.seconds ? lastWithdrawal.requestedAt.seconds * 1000 : (lastWithdrawal.requestedAt ? new Date(lastWithdrawal.requestedAt).getTime() : 0)))
+    : 0;
+
+  const timeSinceLastWithdrawal = Date.now() - lastWithdrawalTime;
+  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
+  const remainingCooldownMs = isWithdrawalCooldownActive ? THREE_DAYS_MS - timeSinceLastWithdrawal : 0;
+
+  const getCooldownLabel = (ms: number) => {
+    const totalHours = Math.floor(ms / (1000 * 60 * 60));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    const mins = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    if (days > 0) return `${days} dia(s) e ${hours} hora(s)`;
+    if (hours > 0) return `${hours} hora(s) e ${mins} min`;
+    return `${Math.max(1, mins)} minuto(s)`;
+  };
 
   // Valor total alocado em posições ativas
   const positionsAllocatedMargin = useMemo(() => {
@@ -1217,19 +1248,33 @@ export default function Home() {
       return;
     }
 
-    // 2. Validar Montante (Mínimo de 300,00 MT)
+    // 2. Validar Intervalo de 3 Dias entre levantamentos
+    if (isWithdrawalCooldownActive) {
+      showToast(
+        `Regra de Segurança: Só é permitido solicitar um novo levantamento após 3 dias do último pedido. Próximo levantamento desbloqueado em: ${getCooldownLabel(remainingCooldownMs)}.`,
+        'error'
+      );
+      return;
+    }
+
+    // 3. Validar Montante (Mínimo de 300,00 MT e Máximo de 2.000,00 MT)
     const numAmount = parseFloat(withdrawalAmount);
     if (isNaN(numAmount) || numAmount < 300) {
       showToast('O valor mínimo de levantamento é de 300,00 MT.', 'error');
       return;
     }
 
-    // 3. Taxa de 5% sobre o valor levantado (cortada do saldo que sobra na conta)
+    if (numAmount > 2000) {
+      showToast('O valor máximo permitido por levantamento é de 2.000,00 MT.', 'error');
+      return;
+    }
+
+    // 4. Taxa de 5% sobre o valor levantado (cortada do saldo que sobra na conta)
     const fee = Math.round(numAmount * 0.05 * 100) / 100;
     const totalDebitado = Number((numAmount + fee).toFixed(2));
     const saldoRestante = Number((balance - totalDebitado).toFixed(2));
 
-    // 4. Validar Reserva Obrigatória de 1.000 MT: sempre deve sobrar 1000 MT na conta
+    // 5. Validar Reserva Obrigatória de 1.000 MT: sempre deve sobrar 1000 MT na conta
     if (saldoRestante < 1000) {
       showToast(
         `Regra TapRise: O levantamento foi recusado porque deve sempre sobrar no mínimo 1.000,00 MT na conta após o levantamento e a taxa de 5% (${fee.toFixed(2)} MT). Com o saldo atual de ${balance.toFixed(2)} MT, restariam apenas ${saldoRestante.toFixed(2)} MT.`,
@@ -1238,14 +1283,14 @@ export default function Home() {
       return;
     }
 
-    // 5. Validar Nome Completo do Titular
+    // 6. Validar Nome Completo do Titular
     const cleanName = withdrawalName.trim();
     if (!cleanName || cleanName.length < 3) {
       showToast('Por favor, informe o seu nome completo de confirmação do titular da conta.', 'error');
       return;
     }
 
-    // 6. Validar Número de Telefone (M-Pesa 84/85 ou e-Mola 86/87)
+    // 7. Validar Número de Telefone (M-Pesa 84/85 ou e-Mola 86/87)
     const cleanPhone = withdrawalPhone.replace(/\D/g, '');
     if (withdrawalMethod === 'mpesa') {
       if (cleanPhone.length !== 9 || (!cleanPhone.startsWith('84') && !cleanPhone.startsWith('85'))) {
@@ -1267,12 +1312,13 @@ export default function Home() {
       const hoje = getMaputoTodayDate();
       const operatorLabel = withdrawalMethod === 'mpesa' ? 'M-Pesa' : 'e-Mola';
 
-      // A. Atualizar saldo do usuário em users/{uid}
+      // A. Atualizar saldo do usuário em users/{uid} com lastWithdrawalAt
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
         balance: newBal,
         saldoVirtual: newBal,
         patrimonioTotal: newBal + unrealizedPnL,
+        lastWithdrawalAt: serverTimestamp(),
         atualizadoEm: serverTimestamp()
       });
 
@@ -2429,13 +2475,13 @@ export default function Home() {
                     <span className="text-[11px] font-bold uppercase tracking-wider">Saldo Retirável</span>
                     <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
                   </div>
-                  <p className={`text-xl font-black ${withdrawableBalance >= 1000 ? 'text-emerald-600' : 'text-slate-600'}`}>
+                  <p className={`text-xl font-black ${withdrawableBalance >= 300 ? 'text-emerald-600' : 'text-slate-600'}`}>
                     {formatMT(withdrawableBalance)}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    {withdrawableBalance >= 1000
+                    {withdrawableBalance >= 300
                       ? 'Livre p/ M-Pesa / e-Mola'
-                      : 'Mínimo 1.000 MT retirável'}
+                      : 'Mínimo 300 MT retirável'}
                   </p>
                 </div>
 
@@ -2576,9 +2622,12 @@ export default function Home() {
                   {/* Banner de Destaque */}
                   <div className="bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 rounded-3xl p-6 sm:p-7 text-white shadow-lg relative overflow-hidden">
                     <div className="relative z-10 max-w-xl space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white border border-white/30 uppercase tracking-wider">
                           Canal Oficial de Recarga
+                        </span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-400 text-slate-900 uppercase tracking-wider">
+                          Mínimo: 1.000,00 MT
                         </span>
                         <span className="text-xs text-amber-100 font-medium">
                           Carteira Móvel e-Mola (Movitel)
@@ -2588,7 +2637,22 @@ export default function Home() {
                         Depósito via e-Mola
                       </h3>
                       <p className="text-xs text-amber-100/90 leading-relaxed">
-                        Faça a recarga da sua conta de forma simples e rápida diretamente pelo seu telemóvel usando o serviço e-Mola.
+                        Faça a recarga da sua conta de forma simples e rápida diretamente pelo seu telemóvel usando o serviço e-Mola. O valor mínimo para qualquer depósito é de <strong>1.000,00 MT</strong>.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Alerta de Depósito Mínimo Obrigatório */}
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-900 shadow-xs">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 font-black">
+                      <AlertCircle className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-black text-amber-950 uppercase tracking-wider text-[11px]">
+                        Regra Oficial: Depósito Mínimo de 1.000,00 MT
+                      </p>
+                      <p className="text-amber-800 text-[11px] mt-0.5 leading-relaxed">
+                        O montante mínimo de recarga permitido na plataforma é de <strong>1.000,00 MT</strong>. Transferências com valores inferiores a 1.000 MT não serão validadas nem creditadas pelo sistema.
                       </p>
                     </div>
                   </div>
@@ -2698,7 +2762,7 @@ export default function Home() {
                       <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
                         <span className="w-6 h-6 rounded-full bg-amber-500 text-white text-[11px] font-black flex items-center justify-center">3</span>
                         <p className="font-bold text-slate-900 pt-1">Confirme o Titular</p>
-                        <p className="text-slate-500 text-[11px]">Verifique <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor e confirme com o PIN.</p>
+                        <p className="text-slate-500 text-[11px]">Verifique <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>1.000,00 MT</strong>) e confirme com o PIN.</p>
                       </div>
                       <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
                         <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-black flex items-center justify-center">4</span>
@@ -2950,7 +3014,7 @@ export default function Home() {
                         Levantamento Direto para o seu Telemóvel
                       </h3>
                       <p className="text-xs text-slate-300 leading-relaxed">
-                        Retire o seu saldo disponível a partir de <strong>300,00 MT</strong>. Taxa operacional de <strong>5%</strong> sobre o valor levantado (debitada do saldo remanescente). Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
+                        Retire o seu saldo disponível entre <strong>300,00 MT</strong> e <strong>2.000,00 MT</strong> por pedido (intervalo mínimo de <strong>3 dias</strong> entre pedidos). Taxa operacional de <strong>5%</strong> sobre o valor levantado (debitada do saldo remanescente). Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
                       </p>
                     </div>
 
@@ -2963,7 +3027,7 @@ export default function Home() {
                         <span>Novo Levantamento</span>
                       </button>
                       <span className="text-[10px] text-slate-400 text-center">
-                        Taxa operacional: 5% • Mínimo: 300 MT
+                        Mínimo: 300 MT • Máx: 2.000 MT • 1x a cada 3 dias
                       </span>
                     </div>
                   </div>
@@ -3243,6 +3307,17 @@ export default function Home() {
                 <p className="text-xs text-blue-100 leading-relaxed">
                   Partilhe o seu link exclusivo. Quando um amigo se registar através dele e tiver saldo creditado pela Administração pela primeira vez, você recebe <strong>5% do valor creditado</strong> diretamente no seu saldo disponível!
                 </p>
+
+                {/* Condição Obrigatória: Apenas quem já depositou recebe */}
+                <div className="p-3 bg-amber-400/20 border border-amber-300/40 rounded-2xl text-[11px] text-amber-100 space-y-1 backdrop-blur-xs">
+                  <div className="flex items-center gap-1.5 font-black text-amber-300 uppercase tracking-wider text-[10px]">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span>Condição Obrigatória para Receber o Bónus</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    <strong>Apenas investidores que já tiverem efetuado o seu 1º depósito</strong> (mínimo de 1.000 MT) têm direito a receber os 5% de bónus de convite. Usuários que ainda não tenham realizado depósito não receberão comissões por indicação.
+                  </p>
+                </div>
 
                 {/* Link Box & Copy Button */}
                 <div className="space-y-2">
@@ -3630,13 +3705,26 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Aviso de Depósito Mínimo Obrigatório */}
+              <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-amber-900">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <div>
+                  <p className="font-bold text-[11px] text-amber-950">
+                    Depósito Mínimo Obrigatório: 1.000,00 MT
+                  </p>
+                  <p className="text-[11px] text-amber-800 leading-snug">
+                    O valor mínimo de recarga é de <strong>1.000,00 MT</strong>. Valores inferiores não são aceites pelo sistema.
+                  </p>
+                </div>
+              </div>
+
               {/* Instruções Rápidas */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs text-slate-600 space-y-1.5">
                 <p className="font-bold text-slate-800">Instruções no telemóvel:</p>
                 <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-600">
                   <li>Disque <strong>*898#</strong> ou aceda à app e-Mola.</li>
                   <li>Escolha <strong>Transferir Dinheiro</strong> para <strong>877083749</strong>.</li>
-                  <li>Confirme o nome <strong>ELIZABETE NHATSUNGUE</strong> e conclua com o seu PIN.</li>
+                  <li>Confirme o nome <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>1.000,00 MT</strong>) e conclua com o seu PIN.</li>
                 </ol>
               </div>
 
@@ -3843,7 +3931,7 @@ export default function Home() {
                     4. Montante a Levantar (MT)
                   </label>
                   <span className="text-[11px] text-slate-500">
-                    Mínimo: <strong className="text-slate-800">300,00 MT</strong>
+                    Mínimo: <strong className="text-slate-800">300 MT</strong> • Máx: <strong className="text-slate-800">2.000 MT</strong>
                   </span>
                 </div>
                 <div className="relative">
@@ -3851,6 +3939,7 @@ export default function Home() {
                     type="number"
                     step="50"
                     min="300"
+                    max="2000"
                     placeholder="300"
                     value={withdrawalAmount}
                     onChange={(e) => setWithdrawalAmount(e.target.value)}
@@ -3863,14 +3952,14 @@ export default function Home() {
 
                 {/* Chips de Valor Rápido */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {[300, 500, 1000, 2500].map((preset) => (
+                  {[300, 500, 1000, 2000].map((preset) => (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => setWithdrawalAmount(preset.toString())}
                       className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                     >
-                      +{preset.toLocaleString('pt-MZ')} MT
+                      {preset === 2000 ? '2.000 MT (Máx)' : `+${preset.toLocaleString('pt-MZ')} MT`}
                     </button>
                   ))}
                   {withdrawableBalance >= 300 && (
@@ -3879,7 +3968,7 @@ export default function Home() {
                       onClick={() => setWithdrawalAmount(withdrawableBalance.toString())}
                       className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-100 hover:bg-blue-200 text-blue-700 transition"
                     >
-                      Máximo Retirável ({formatMT(withdrawableBalance)})
+                      Máximo Permitido ({formatMT(withdrawableBalance)})
                     </button>
                   )}
                 </div>
@@ -3892,6 +3981,7 @@ export default function Home() {
                 const debAmt = amt + feeAmt;
                 const remBal = balance - debAmt;
                 const isShort = remBal < 1000;
+                const isOverMax = amt > 2000;
 
                 return (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2 text-xs">
@@ -3929,6 +4019,13 @@ export default function Home() {
                       <span className="font-mono font-bold text-amber-700">1.000,00 MT</span>
                     </div>
 
+                    {isOverMax && (
+                      <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 font-semibold flex items-start gap-1.5 mt-1">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                        <span>Atenção: O valor máximo por levantamento é de 2.000,00 MT a cada pedido.</span>
+                      </div>
+                    )}
+
                     {isShort && (
                       <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 font-semibold flex items-start gap-1.5 mt-1">
                         <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
@@ -3939,13 +4036,28 @@ export default function Home() {
                 );
               })()}
 
-              {/* Destaque de Espera 2 a 3 horas */}
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-900 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>
-                  <strong>Prazo Estimado de Envio:</strong> Entre 2 a 3 horas após a confirmação.
-                </span>
-              </div>
+              {/* Destaque de Intervalo de 3 Dias */}
+              {isWithdrawalCooldownActive ? (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl text-[11px] text-amber-900 flex items-start gap-2">
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Período de Segurança (Intervalo de 3 Dias Ativo)</p>
+                    <p className="text-amber-800 mt-0.5">
+                      Só é permitido solicitar 1 levantamento a cada 3 dias. Próximo pedido disponível em: <strong>{getCooldownLabel(remainingCooldownMs)}</strong>.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-900 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span><strong>Prazo de Envio:</strong> 2 a 3 horas após confirmação (1 levantamento a cada 3 dias).</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
+                    Disponível
+                  </span>
+                </div>
+              )}
 
               {/* Botões de Ação */}
               <div className="flex space-x-3 pt-2">
@@ -3960,8 +4072,10 @@ export default function Home() {
                   type="submit"
                   disabled={
                     withdrawalSubmitting ||
+                    isWithdrawalCooldownActive ||
                     !withdrawalWindow.isOpen ||
                     parseFloat(withdrawalAmount) < 300 ||
+                    parseFloat(withdrawalAmount) > 2000 ||
                     balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ||
                     withdrawalPhone.length !== 9 ||
                     !withdrawalName.trim()
@@ -3973,8 +4087,12 @@ export default function Home() {
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                       <span>A Submeter Pedido...</span>
                     </>
+                  ) : isWithdrawalCooldownActive ? (
+                    <span>Disponível em {getCooldownLabel(remainingCooldownMs)}</span>
                   ) : !withdrawalWindow.isOpen ? (
                     <span>Janela Fechada (Abre 08h)</span>
+                  ) : parseFloat(withdrawalAmount) > 2000 ? (
+                    <span>Máximo Permitido: 2.000 MT</span>
                   ) : balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ? (
                     <span>Reserva Insuficiente (&lt; 1.000 MT)</span>
                   ) : (

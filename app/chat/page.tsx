@@ -1251,13 +1251,13 @@ export default function ChatPage() {
       return;
     }
 
-    if (file.size > 3 * 1024 * 1024) {
-      showToast('A imagem não pode ter mais de 3MB.', 'error');
+    if (file.size > 25 * 1024 * 1024) {
+      showToast('A imagem não pode ter mais de 25MB.', 'error');
       return;
     }
 
     try {
-      showToast('A otimizar imagem para envio rápido...', 'info');
+      showToast('A preparar foto para envio rápido...', 'info');
       const compressed = await compressChatImage(file);
       setPendingImage({
         file,
@@ -1266,9 +1266,10 @@ export default function ChatPage() {
         width: compressed.width,
         height: compressed.height
       });
+      showToast('✓ Foto pronta! Toque em Enviar.', 'success');
     } catch (err: any) {
       console.error('Erro ao comprimir imagem:', err);
-      showToast('Falha ao processar imagem.', 'error');
+      showToast('Falha ao processar imagem. Tente outra foto.', 'error');
     } finally {
       e.target.value = '';
     }
@@ -2005,8 +2006,17 @@ export default function ChatPage() {
                     <Camera className="w-3.5 h-3.5 text-blue-400" />
                     <span>Foto pronta para envio</span>
                   </p>
-                  <p className="text-[11px] text-slate-400">Escreva uma legenda opcional abaixo e toque em Enviar.</p>
+                  <p className="text-[11px] text-slate-400">Legenda opcional abaixo ou envie imediatamente.</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={(e) => handleSendMessage(e as any)}
+                  disabled={isSending}
+                  className="px-3.5 py-2 bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Enviar Foto</span>
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -2264,8 +2274,17 @@ export default function ChatPage() {
                       <Camera className="w-3.5 h-3.5 text-amber-400" />
                       <span>Foto pronta para envio privado</span>
                     </p>
-                    <p className="text-[11px] text-slate-400">Adicione uma nota explicativa ou toque em Enviar.</p>
+                    <p className="text-[11px] text-slate-400">Nota opcional abaixo ou envie diretamente.</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSendPrivateMessage(e as any)}
+                    disabled={isSendingPrivate}
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Enviar Foto</span>
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
