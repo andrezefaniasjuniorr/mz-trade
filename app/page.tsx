@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   TrendingUp,
   TrendingDown,
   DollarSign,
-  PieChart,
   Activity,
   Award,
   BookOpen,
@@ -16,18 +15,13 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   RefreshCw,
-  Sliders,
-  Send,
   MessageSquare,
-  ThumbsUp,
   CheckCircle,
   AlertCircle,
   BarChart2,
   Layers,
-  Globe,
   Zap,
   Info,
-  Flame,
   ArrowRight,
   Database,
   LogIn,
@@ -35,17 +29,14 @@ import {
   UserPlus,
   Lock,
   Bell,
-  Sparkles,
   Clock,
   Check,
   Wallet,
   Smartphone,
   ArrowDownLeft,
   History,
-  CreditCard,
   CheckCircle2,
   Copy,
-  ExternalLink,
   Target,
   Briefcase,
   Coins,
@@ -56,7 +47,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { auth, db, initAnalytics, firebaseConfig } from '@/src/firebase';
+import { db, initAnalytics } from '@/src/firebase';
 import { prefetchLatestChatMessages } from '@/lib/chatService';
 import {
   getMaputoTodayDate,
@@ -68,12 +59,6 @@ import {
 } from '@/lib/maputoTime';
 import { WalletBalanceChart } from '@/components/WalletBalanceChart';
 import Janela21hTerminal from '@/components/Janela21hTerminal';
-import {
-  onAuthStateChanged,
-  signInAnonymously,
-  signOut,
-  type User as FirebaseUser
-} from 'firebase/auth';
 import {
   collection,
   doc,
@@ -131,32 +116,14 @@ export interface ClosedTrade {
   timestamp: string;
 }
 
-export interface Post {
-  id: number;
-  author: string;
-  location: string;
-  time: string;
-  content: string;
-  likes: number;
-  comments: number;
-  userLiked: boolean;
-}
-
-export interface InstructorMessage {
-  id: number;
-  title: string;
-  content: string;
-  author: string;
-  time: string;
-  badge: string;
-}
-
 export interface ChartCandle {
   time: string;
   open: number;
   high: number;
   low: number;
   close: number;
+  volume?: number;
+  timestamp: number;
 }
 
 export interface WithdrawalRecord {
@@ -198,7 +165,6 @@ export interface UserTransaction {
 // ==========================================
 
 const INITIAL_COMMODITIES: Commodity[] = [
-  // Agricultura Estratégica
   {
     id: 'milho',
     name: 'Milho Branco (Chókwè)',
@@ -206,14 +172,13 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 42.50,
     unit: 'Kg',
-    change24h: 1.80,
-    high: 44.00,
-    low: 41.20,
-    open: 41.75,
-    baseVolatility: 0.008,
-    description: 'Cereal essencial de segurança alimentar e produção no Vale do Limpopo'
+    change24h: 2.45,
+    high: 44.80,
+    low: 40.80,
+    open: 41.48,
+    baseVolatility: 0.012,
+    description: 'Cereal essencial de segurança alimentar no Vale do Limpopo'
   },
-  // Energia
   {
     id: 'brent',
     name: 'Petróleo Bruto (Brent)',
@@ -221,11 +186,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Energia',
     price: 5120.50,
     unit: 'Barril (bbl)',
-    change24h: 1.45,
-    high: 5180.00,
-    low: 5050.20,
-    open: 5047.00,
-    baseVolatility: 0.004,
+    change24h: -3.15,
+    high: 5290.00,
+    low: 5040.00,
+    open: 5287.00,
+    baseVolatility: 0.018,
     description: 'Referência internacional para combustíveis em Moçambique'
   },
   {
@@ -235,11 +200,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Energia',
     price: 185.30,
     unit: 'MMBtu',
-    change24h: -2.10,
-    high: 192.00,
-    low: 181.50,
-    open: 189.20,
-    baseVolatility: 0.008,
+    change24h: 4.82,
+    high: 194.20,
+    low: 176.40,
+    open: 176.78,
+    baseVolatility: 0.022,
     description: 'Bacia do Rovuma, Cabo Delgado'
   },
   {
@@ -249,15 +214,13 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Energia',
     price: 8200.00,
     unit: 'Tonelada (t)',
-    change24h: 0.85,
-    high: 8350.00,
-    low: 8100.00,
-    open: 8130.00,
-    baseVolatility: 0.003,
+    change24h: 1.15,
+    high: 8420.00,
+    low: 8080.00,
+    open: 8106.80,
+    baseVolatility: 0.014,
     description: 'Bacia carbonífera de Moatize, Tete'
   },
-
-  // Metais
   {
     id: 'gold',
     name: 'Ouro Fino 999 (Manica)',
@@ -265,11 +228,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Metais',
     price: 148500.00,
     unit: 'Onça (oz)',
-    change24h: 0.62,
-    high: 149200.00,
-    low: 147800.00,
-    open: 147580.00,
-    baseVolatility: 0.002,
+    change24h: 1.85,
+    high: 151200.00,
+    low: 146100.00,
+    open: 145800.00,
+    baseVolatility: 0.010,
     description: 'Reserva de valor e exploração aluvial em Manica'
   },
   {
@@ -279,11 +242,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Metais',
     price: 1820.00,
     unit: 'Onça (oz)',
-    change24h: -0.45,
-    high: 1860.00,
-    low: 1800.00,
-    open: 1828.00,
-    baseVolatility: 0.005,
+    change24h: -2.40,
+    high: 1890.00,
+    low: 1785.00,
+    open: 1864.80,
+    baseVolatility: 0.016,
     description: 'Metal precioso com alta aplicação industrial'
   },
   {
@@ -293,11 +256,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Metais',
     price: 580.00,
     unit: 'Kg',
-    change24h: 2.15,
-    high: 592.00,
-    low: 565.00,
-    open: 567.80,
-    baseVolatility: 0.006,
+    change24h: 3.60,
+    high: 598.00,
+    low: 556.00,
+    open: 559.80,
+    baseVolatility: 0.015,
     description: 'Condutores elétricos e transição energética'
   },
   {
@@ -307,15 +270,13 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Metais',
     price: 1540.00,
     unit: 'Tonelada (t)',
-    change24h: -1.10,
-    high: 1580.00,
-    low: 1520.00,
-    open: 1557.00,
-    baseVolatility: 0.004,
+    change24h: -1.80,
+    high: 1595.00,
+    low: 1515.00,
+    open: 1568.20,
+    baseVolatility: 0.013,
     description: 'Fundição Mozal em Beluluane, Matola'
   },
-
-  // Agricultura
   {
     id: 'cashew',
     name: 'Castanha de Caju (Nampula)',
@@ -323,11 +284,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 95.50,
     unit: 'Kg',
-    change24h: 4.80,
-    high: 98.00,
-    low: 90.20,
-    open: 91.10,
-    baseVolatility: 0.009,
+    change24h: 5.40,
+    high: 99.20,
+    low: 89.80,
+    open: 90.60,
+    baseVolatility: 0.025,
     description: 'Principal cultura de rendimento de exportação'
   },
   {
@@ -337,11 +298,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 32.40,
     unit: 'Kg',
-    change24h: -0.30,
-    high: 33.10,
-    low: 31.80,
-    open: 32.50,
-    baseVolatility: 0.005,
+    change24h: -0.90,
+    high: 33.60,
+    low: 31.40,
+    open: 32.70,
+    baseVolatility: 0.011,
     description: 'Produção canavieira nacional'
   },
   {
@@ -351,11 +312,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 112.00,
     unit: 'Kg',
-    change24h: 1.20,
-    high: 115.00,
-    low: 109.50,
-    open: 110.65,
-    baseVolatility: 0.007,
+    change24h: 2.10,
+    high: 116.50,
+    low: 108.20,
+    open: 109.70,
+    baseVolatility: 0.015,
     description: 'Fibras têxteis de elevada pureza'
   },
   {
@@ -365,11 +326,11 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 24.50,
     unit: 'Kg',
-    change24h: -1.80,
-    high: 25.50,
-    low: 24.10,
-    open: 24.95,
-    baseVolatility: 0.006,
+    change24h: -3.80,
+    high: 25.90,
+    low: 23.80,
+    open: 25.47,
+    baseVolatility: 0.014,
     description: 'Cereal de consumo básico nas padarias do país'
   },
   {
@@ -379,76 +340,15 @@ const INITIAL_COMMODITIES: Commodity[] = [
     category: 'Agricultura',
     price: 42.00,
     unit: 'Kg',
-    change24h: 0.50,
-    high: 43.20,
-    low: 41.50,
-    open: 41.79,
-    baseVolatility: 0.003,
+    change24h: 1.25,
+    high: 43.60,
+    low: 41.10,
+    open: 41.48,
+    baseVolatility: 0.010,
     description: 'Regadio do Baixo Limpopo, Gaza'
   }
 ];
 
-const INITIAL_INSTRUCTOR_MESSAGES: InstructorMessage[] = [
-  {
-    id: 1,
-    title: 'Análise Semanal: Castanha de Caju em Nampula',
-    content: 'A procura internacional por castanha moçambicana subiu 8% esta semana nos portos asiáticos. Excelente momento para observar posições de compra a curto prazo.',
-    author: 'Instrutor Mateus Maputo',
-    time: 'Há 25 minutos',
-    badge: 'Oportunidade'
-  },
-  {
-    id: 2,
-    title: 'Gestão de Risco para Iniciantes',
-    content: 'Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores (Energia, Metais e Agricultura) para proteger o seu capital virtual!',
-    author: 'Equipa MZ Trade',
-    time: 'Há 2 horas',
-    badge: 'Dica de Ouro'
-  },
-  {
-    id: 3,
-    title: 'Impacto da Bacia do Rovuma',
-    content: 'Contratos futuros de Gás Natural (NATGAS) apresentam menor volatilidade histórica que o Petróleo Brent. Boa opção para investidores de perfil moderado.',
-    author: 'Prof. Américo Sitoe',
-    time: 'Ontem às 16:30',
-    badge: 'Análise Macro'
-  }
-];
-
-const INITIAL_POSTS: Post[] = [
-  {
-    id: 101,
-    author: 'Armando Cossa',
-    location: 'Maputo',
-    time: 'Há 15 min',
-    content: 'Acredito fortemente na valorização do Petróleo Brent com a nova procura na Ásia. Fechei uma posição compradora com +12.5% de lucro virtual!',
-    likes: 14,
-    comments: 3,
-    userLiked: false
-  },
-  {
-    id: 102,
-    author: 'Beatriz Nhantumbo',
-    location: 'Beira',
-    time: 'Há 1 hora',
-    content: 'A Castanha de Caju (CAJU-MZ) está com excelente volume no mercado. Quem mais está a negociar o setor agrícola moçambicano?',
-    likes: 22,
-    comments: 8,
-    userLiked: true
-  },
-  {
-    id: 103,
-    author: 'Celso Macamo',
-    location: 'Nampula',
-    time: 'Há 3 horas',
-    content: 'O Carvão de Moatize está a formar um suporte forte nos 8.100 MT. Abri posição de compra visando os 8.400 MT até ao fecho do ciclo.',
-    likes: 9,
-    comments: 2,
-    userLiked: false
-  }
-];
-
-// Helper for formatting Meticais (MT)
 const formatMT = (value: number) => {
   return new Intl.NumberFormat('pt-MZ', {
     minimumFractionDigits: 2,
@@ -456,117 +356,328 @@ const formatMT = (value: number) => {
   }).format(value) + ' MT';
 };
 
-// Generate deterministic synthetic candles
-function generateCandles(commodity: Commodity, timeframe: string = '1m'): ChartCandle[] {
-  const points: ChartCandle[] = [];
-  let current = commodity.open || commodity.price * 0.98;
-  const count = timeframe === '15m' ? 30 : timeframe === '1D' ? 20 : 42;
+const formatQuote = (val: number) => {
+  if (val < 10) return val.toFixed(4);
+  if (val < 100) return val.toFixed(3);
+  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
-  for (let i = 0; i < count; i++) {
-    const volatility = commodity.price * (commodity.baseVolatility || 0.005);
-    const open = current;
-    const delta = (Math.sin(i * 0.5) * 0.5 + (Math.random() - 0.48)) * volatility * 1.5;
-    const close = Math.max(open * 0.5, open + delta);
-    const high = Math.max(open, close) + Math.random() * volatility;
-    const low = Math.max(0.01, Math.min(open, close) - Math.random() * volatility);
+// ========================================================
+// ENGINE TÉCNICO: CADA MERCADO COM IDENTIDADE E ONDAS PRÓPRIAS
+// ========================================================
 
-    points.push({
-      time: `${i + 1}`,
-      open,
-      high,
-      low,
-      close
+interface AssetSeed {
+  primaryFreq: number;
+  secondaryFreq: number;
+  primaryAmp: number;
+  secondaryAmp: number;
+  drift: number;
+  volatilityMult: number;
+}
+
+function getAssetSeed(id: string): AssetSeed {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash << 5) - hash + id.charCodeAt(i);
+    hash |= 0;
+  }
+  const abs = Math.abs(hash);
+
+  const freqTable = [0.22, 0.35, 0.18, 0.44, 0.28, 0.52, 0.15];
+  const secFreqTable = [0.08, 0.14, 0.21, 0.11, 0.17, 0.09, 0.25];
+  const driftTable = [0.0018, -0.0016, 0.0022, -0.0024, 0.0008, -0.0011, 0.0014];
+
+  return {
+    primaryFreq: freqTable[abs % freqTable.length],
+    secondaryFreq: secFreqTable[(abs >> 2) % secFreqTable.length],
+    primaryAmp: 0.65 + ((abs % 40) / 100),
+    secondaryAmp: 0.35 + (((abs >> 3) % 30) / 100),
+    drift: driftTable[abs % driftTable.length],
+    volatilityMult: 0.9 + ((abs % 50) / 100)
+  };
+}
+
+const persistentCandleStore: Record<string, ChartCandle[]> = {};
+
+function getOrCreateCandles(commodity: Commodity, timeframe: string): ChartCandle[] {
+  const normTf = (timeframe || '5M').toUpperCase();
+  const key = `${commodity.id}_${normTf}`;
+
+  const tfConfig: Record<string, { count: number; intervalMins: number; volMult: number }> = {
+    '1M': { count: 42, intervalMins: 1, volMult: 0.006 },
+    '5M': { count: 36, intervalMins: 5, volMult: 0.014 },
+    '15M': { count: 30, intervalMins: 15, volMult: 0.024 },
+    '1H': { count: 24, intervalMins: 60, volMult: 0.042 },
+    '1D': { count: 20, intervalMins: 1440, volMult: 0.080 }
+  };
+
+  const cfg = tfConfig[normTf] || tfConfig['5M'];
+  const intervalMs = cfg.intervalMins * 60000;
+  const now = Date.now();
+
+  if (persistentCandleStore[key] && persistentCandleStore[key].length > 0) {
+    const list = persistentCandleStore[key];
+    const last = list[list.length - 1];
+
+    if (now - last.timestamp >= intervalMs) {
+      const candleTime = new Date(now);
+      const timeStr = normTf === '1D'
+        ? `${candleTime.getDate()}/${candleTime.getMonth() + 1}`
+        : `${String(candleTime.getHours()).padStart(2, '0')}:${String(candleTime.getMinutes()).padStart(2, '0')}`;
+
+      const newCandle: ChartCandle = {
+        time: timeStr,
+        open: last.close,
+        high: Math.max(last.close, commodity.price),
+        low: Math.min(last.close, commodity.price),
+        close: commodity.price,
+        volume: Math.floor(22000 + ((list.length * 5129) % 40000)),
+        timestamp: now
+      };
+
+      list.push(newCandle);
+      if (list.length > cfg.count + 8) {
+        list.shift();
+      }
+    } else {
+      last.close = commodity.price;
+      last.high = Math.max(last.high, commodity.price);
+      last.low = Math.min(last.low, commodity.price);
+    }
+    return list;
+  }
+
+  const seed = getAssetSeed(commodity.id);
+  const list: ChartCandle[] = [];
+  const basePrice = commodity.price || 100;
+  const unitVolatility = basePrice * (commodity.baseVolatility || 0.014) * (cfg.volMult / 0.014) * seed.volatilityMult;
+  let current = commodity.open || (basePrice * (1 - seed.drift * cfg.count * 0.4));
+
+  for (let i = cfg.count; i >= 1; i--) {
+    const wave1 = Math.sin(i * seed.primaryFreq) * seed.primaryAmp;
+    const wave2 = Math.cos(i * seed.secondaryFreq) * seed.secondaryAmp;
+    const stepNoise = (((i * 7919 + seed.primaryFreq * 1000) % 1000) / 1000 - 0.495);
+    const delta = (wave1 + wave2 + stepNoise + seed.drift) * unitVolatility;
+
+    const open = Math.max(0.01, current);
+    const close = Math.max(0.01, open + delta);
+    const wickHigh = Math.abs(((i * 3571) % 500) / 500) * unitVolatility * 0.95;
+    const wickLow = Math.abs(((i * 4861) % 500) / 500) * unitVolatility * 0.95;
+    const high = Math.max(open, close) + wickHigh;
+    const low = Math.max(0.001, Math.min(open, close) - wickLow);
+
+    const candleTimestamp = now - i * intervalMs;
+    const candleTime = new Date(candleTimestamp);
+    const timeStr = normTf === '1D'
+      ? `${candleTime.getDate()}/${candleTime.getMonth() + 1}`
+      : `${String(candleTime.getHours()).padStart(2, '0')}:${String(candleTime.getMinutes()).padStart(2, '0')}`;
+
+    const vol = Math.floor(15000 + ((i * 6133 + seed.primaryAmp * 10000) % 55000));
+
+    list.push({
+      time: timeStr,
+      open: Number(open.toFixed(commodity.price < 100 ? 3 : 2)),
+      high: Number(high.toFixed(commodity.price < 100 ? 3 : 2)),
+      low: Number(low.toFixed(commodity.price < 100 ? 3 : 2)),
+      close: Number(close.toFixed(commodity.price < 100 ? 3 : 2)),
+      volume: vol,
+      timestamp: candleTimestamp
     });
     current = close;
   }
-  return points;
+
+  if (list.length > 0) {
+    const last = list[list.length - 1];
+    last.close = commodity.price;
+    last.high = Math.max(last.high, commodity.price);
+    last.low = Math.min(last.low, commodity.price);
+    last.timestamp = now;
+  }
+
+  persistentCandleStore[key] = list;
+  return list;
 }
 
 // ==========================================
-// CANVAS FINANCIAL CHART COMPONENT
+// PROFESSIONAL FINANCIAL CHART COMPONENT
 // ==========================================
 
 const InteractiveChart = ({
   commodity,
-  chartType = 'candle',
-  timeframe = '1m',
-  height = 300
+  chartType: externalChartType,
+  timeframe: externalTimeframe,
+  height = 320,
+  onTimeframeChange,
+  onChartTypeChange
 }: {
   commodity: Commodity;
-  chartType: 'candle' | 'line';
-  timeframe: string;
+  chartType?: 'candle' | 'line';
+  timeframe?: string;
   height?: number;
+  onTimeframeChange?: (tf: '1M' | '5M' | '15M' | '1H' | '1D') => void;
+  onChartTypeChange?: (ct: 'candle' | 'line') => void;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [hoverInfo, setHoverInfo] = useState<ChartCandle | null>(null);
+  const [internalTimeframe, setInternalTimeframe] = useState<'1M' | '5M' | '15M' | '1H' | '1D'>('5M');
+  const [internalChartType, setInternalChartType] = useState<'candle' | 'line'>('candle');
 
-  // Generate historical base candles when commodity or timeframe changes
-  const baseCandles = useMemo(() => {
-    return generateCandles(commodity, timeframe);
-  }, [commodity, timeframe]);
+  const activeTimeframe = (externalTimeframe ? externalTimeframe.toUpperCase() : internalTimeframe) as '1M' | '5M' | '15M' | '1H' | '1D';
+  const activeChartType = externalChartType || internalChartType;
 
-  // Dynamically update last candle with live price without mutating state
-  const effectiveCandles = useMemo(() => {
-    if (baseCandles.length === 0) return [];
-    const copy = [...baseCandles];
-    const lastIndex = copy.length - 1;
-    const last = { ...copy[lastIndex] };
-    last.close = commodity.price;
-    last.high = Math.max(last.high, commodity.price);
-    last.low = Math.min(last.low, commodity.price);
-    copy[lastIndex] = last;
-    return copy;
-  }, [baseCandles, commodity.price]);
+  const [hoverInfo, setHoverInfo] = useState<{
+    candle: ChartCandle;
+    x: number;
+    y: number;
+    price: number;
+  } | null>(null);
 
-  // Render Chart onto Canvas
+  const [lastTickDir, setLastTickDir] = useState<'up' | 'down'>('up');
+  const prevPriceRef = useRef<number>(commodity.price);
+
+  useEffect(() => {
+    if (commodity.price !== prevPriceRef.current) {
+      setLastTickDir(commodity.price >= prevPriceRef.current ? 'up' : 'down');
+      prevPriceRef.current = commodity.price;
+    }
+  }, [commodity.price]);
+
+  const candles = useMemo(() => {
+    return getOrCreateCandles(commodity, activeTimeframe);
+  }, [commodity, activeTimeframe]);
+
+  const handleSetTimeframe = (tf: '1M' | '5M' | '15M' | '1H' | '1D') => {
+    setInternalTimeframe(tf);
+    onTimeframeChange?.(tf);
+  };
+
+  const handleSetChartType = (ct: 'candle' | 'line') => {
+    setInternalChartType(ct);
+    onChartTypeChange?.(ct);
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || effectiveCandles.length === 0) return;
+    if (!canvas || candles.length === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const chartHeight = canvas.height;
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const width = canvas.clientWidth || 760;
+    const chartHeight = height;
 
-    // Clear background
-    ctx.clearRect(0, 0, width, chartHeight);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, width, chartHeight);
-
-    // Draw Grid
-    ctx.strokeStyle = '#F1F5F9';
-    ctx.lineWidth = 1;
-    for (let i = 1; i <= 4; i++) {
-      const y = (chartHeight / 5) * i;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
+    if (canvas.width !== width * dpr || canvas.height !== chartHeight * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = chartHeight * dpr;
     }
 
-    // Find min / max
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // Fundo Escuro Trading Station
+    ctx.fillStyle = '#0b0f19';
+    ctx.fillRect(0, 0, width, chartHeight);
+
+    const rightAxisWidth = 68;
+    const bottomAxisHeight = 24;
+    const plotWidth = width - rightAxisWidth;
+    const plotHeight = chartHeight - bottomAxisHeight;
+    const volumeHeight = plotHeight * 0.16;
+    const pricePlotHeight = plotHeight - volumeHeight;
+
     let minPrice = Infinity;
     let maxPrice = -Infinity;
-    effectiveCandles.forEach((p) => {
+    let maxVolume = 1;
+
+    candles.forEach((p) => {
       if (p.low < minPrice) minPrice = p.low;
       if (p.high > maxPrice) maxPrice = p.high;
+      if ((p.volume || 0) > maxVolume) maxVolume = p.volume || 1;
     });
 
-    const padding = (maxPrice - minPrice) * 0.1 || 1;
+    const priceRange = maxPrice - minPrice || 1;
+    const padding = priceRange * 0.10;
     minPrice -= padding;
     maxPrice += padding;
+    const effectiveRange = maxPrice - minPrice;
 
-    const getY = (val: number) => chartHeight - ((val - minPrice) / (maxPrice - minPrice)) * chartHeight;
-    const stepX = width / effectiveCandles.length;
+    const getY = (val: number) => pricePlotHeight - ((val - minPrice) / effectiveRange) * pricePlotHeight;
+    const stepX = plotWidth / candles.length;
 
-    if (chartType === 'line') {
-      // LINE CHART
+    const drawRoundedRect = (context: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number, r: number) => {
+      if (typeof (context as any).roundRect === 'function') {
+        (context as any).roundRect(rx, ry, rw, rh, r);
+      } else {
+        context.rect(rx, ry, rw, rh);
+      }
+    };
+
+    // GRADE TÉCNICA FINANCEIRA
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+
+    const gridLevels = 5;
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'left';
+
+    for (let i = 0; i <= gridLevels; i++) {
+      const y = (pricePlotHeight / gridLevels) * i;
+      const priceVal = maxPrice - (effectiveRange / gridLevels) * i;
+
       ctx.beginPath();
-      ctx.strokeStyle = commodity.change24h >= 0 ? '#10B981' : '#EF4444';
-      ctx.lineWidth = 2.5;
+      ctx.moveTo(0, y);
+      ctx.lineTo(plotWidth, y);
+      ctx.stroke();
 
-      effectiveCandles.forEach((p, idx) => {
+      ctx.fillText(formatQuote(priceVal), plotWidth + 8, y + 3.5);
+    }
+
+    const timeStepCount = Math.min(7, Math.floor(candles.length / 5));
+    for (let i = 1; i <= timeStepCount; i++) {
+      const idx = Math.floor((candles.length / (timeStepCount + 1)) * i);
+      const x = idx * stepX + stepX / 2;
+
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, plotHeight);
+      ctx.stroke();
+
+      if (candles[idx]) {
+        ctx.textAlign = 'center';
+        ctx.fillText(candles[idx].time, x, plotHeight + 16);
+      }
+    }
+    ctx.setLineDash([]);
+
+    // Volume Inferior
+    candles.forEach((p, idx) => {
+      const x = idx * stepX + stepX / 2;
+      const barW = Math.max(2, stepX * 0.6);
+      const vol = p.volume || 25000;
+      const barH = (vol / maxVolume) * (volumeHeight - 6);
+      const y = plotHeight - barH;
+
+      ctx.fillStyle = p.close >= p.open ? 'rgba(16, 185, 129, 0.22)' : 'rgba(239, 68, 68, 0.22)';
+      ctx.fillRect(x - barW / 2, y, barW, barH);
+    });
+
+    ctx.strokeStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.moveTo(0, plotHeight);
+    ctx.lineTo(width, plotHeight);
+    ctx.moveTo(plotWidth, 0);
+    ctx.lineTo(plotWidth, chartHeight);
+    ctx.stroke();
+
+    // VELAS OU LINHA COM ALTA VISIBILIDADE DE QUEDAS E ALTAS
+    if (activeChartType === 'line') {
+      ctx.beginPath();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.4;
+
+      candles.forEach((p, idx) => {
         const x = idx * stepX + stepX / 2;
         const y = getY(p.close);
         if (idx === 0) ctx.moveTo(x, y);
@@ -574,25 +685,19 @@ const InteractiveChart = ({
       });
       ctx.stroke();
 
-      // Area fill under line
-      ctx.lineTo((effectiveCandles.length - 1) * stepX + stepX / 2, chartHeight);
-      ctx.lineTo(stepX / 2, chartHeight);
+      ctx.lineTo((candles.length - 1) * stepX + stepX / 2, pricePlotHeight);
+      ctx.lineTo(stepX / 2, pricePlotHeight);
       ctx.closePath();
-      const gradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
-      if (commodity.change24h >= 0) {
-        gradient.addColorStop(0, 'rgba(16, 185, 129, 0.25)');
-        gradient.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
-      } else {
-        gradient.addColorStop(0, 'rgba(239, 68, 68, 0.25)');
-        gradient.addColorStop(1, 'rgba(239, 68, 68, 0.0)');
-      }
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, pricePlotHeight);
+      gradient.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
+      gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
       ctx.fillStyle = gradient;
       ctx.fill();
     } else {
-      // CANDLESTICK CHART
-      const candleWidth = Math.max(3, stepX * 0.65);
+      const candleWidth = Math.max(3.5, Math.min(18, stepX * 0.74));
 
-      effectiveCandles.forEach((p, idx) => {
+      candles.forEach((p, idx) => {
         const x = idx * stepX + stepX / 2;
         const openY = getY(p.open);
         const closeY = getY(p.close);
@@ -600,115 +705,244 @@ const InteractiveChart = ({
         const lowY = getY(p.low);
 
         const isBullish = p.close >= p.open;
-        const color = isBullish ? '#10B981' : '#EF4444';
+        const color = isBullish ? '#10b981' : '#ef4444';
 
-        // High-Low Wick
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.3;
         ctx.beginPath();
         ctx.moveTo(x, highY);
         ctx.lineTo(x, lowY);
         ctx.stroke();
 
-        // Body
         ctx.fillStyle = color;
         const top = Math.min(openY, closeY);
-        const bodyH = Math.max(2, Math.abs(openY - closeY));
+        const bodyH = Math.max(2.5, Math.abs(openY - closeY));
         ctx.fillRect(x - candleWidth / 2, top, candleWidth, bodyH);
       });
     }
 
-    // Current Price Line (Dashed)
-    const currentY = getY(commodity.price);
-    ctx.strokeStyle = '#2563EB';
-    ctx.setLineDash([4, 4]);
+    // Linha de Preço Atual
+    const currentPrice = commodity.price;
+    const currentY = getY(currentPrice);
+
+    ctx.strokeStyle = lastTickDir === 'up' ? '#10b981' : '#ef4444';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
     ctx.beginPath();
     ctx.moveTo(0, currentY);
-    ctx.lineTo(width, currentY);
+    ctx.lineTo(plotWidth, currentY);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Price Badge on right edge
-    const badgeWidth = 92;
-    ctx.fillStyle = '#1E40AF';
-    ctx.fillRect(width - badgeWidth, Math.max(4, Math.min(chartHeight - 24, currentY - 11)), badgeWidth, 22);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillText(`${commodity.price.toFixed(2)} MT`, width - badgeWidth + 6, Math.max(4, Math.min(chartHeight - 24, currentY - 11)) + 15);
-  }, [effectiveCandles, chartType, commodity.price, commodity.change24h]);
+    const lastX = (candles.length - 1) * stepX + stepX / 2;
+    ctx.fillStyle = lastTickDir === 'up' ? '#10b981' : '#ef4444';
+    ctx.beginPath();
+    ctx.arc(lastX, currentY, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const badgeH = 20;
+    const badgeW = rightAxisWidth - 6;
+    const badgeY = Math.max(2, Math.min(pricePlotHeight - badgeH, currentY - badgeH / 2));
+
+    ctx.fillStyle = lastTickDir === 'up' ? '#059669' : '#dc2626';
+    ctx.beginPath();
+    drawRoundedRect(ctx, plotWidth + 3, badgeY, badgeW, badgeH, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(formatQuote(currentPrice), plotWidth + 3 + badgeW / 2, badgeY + 13.5);
+
+    // Crosshair Interativo
+    if (hoverInfo) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+
+      ctx.beginPath();
+      ctx.moveTo(hoverInfo.x, 0);
+      ctx.lineTo(hoverInfo.x, plotHeight);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0, hoverInfo.y);
+      ctx.lineTo(plotWidth, hoverInfo.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      drawRoundedRect(ctx, plotWidth + 3, hoverInfo.y - 9, badgeW, 18, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 9.5px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(formatQuote(hoverInfo.price), plotWidth + 3 + badgeW / 2, hoverInfo.y + 3.5);
+
+      const timePillW = 46;
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      drawRoundedRect(ctx, hoverInfo.x - timePillW / 2, plotHeight + 3, timePillW, 18, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 9.5px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(hoverInfo.candle.time, hoverInfo.x, plotHeight + 15);
+    }
+
+    ctx.restore();
+  }, [candles, activeChartType, commodity.price, lastTickDir, hoverInfo, height]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || effectiveCandles.length === 0) return;
+    if (!canvas || candles.length === 0) return;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const x = (e.clientX - rect.left) * scaleX;
-    const stepX = canvas.width / effectiveCandles.length;
-    const idx = Math.min(effectiveCandles.length - 1, Math.max(0, Math.floor(x / stepX)));
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    setHoverInfo(effectiveCandles[idx]);
+    const width = canvas.clientWidth || 760;
+    const plotWidth = width - 68;
+    const pricePlotHeight = height - 24 - (height - 24) * 0.16;
+
+    if (x < 0 || x > plotWidth || y < 0 || y > pricePlotHeight) {
+      setHoverInfo(null);
+      return;
+    }
+
+    const stepX = plotWidth / candles.length;
+    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(x / stepX)));
+    const candle = candles[idx];
+
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    candles.forEach((p) => {
+      if (p.low < minPrice) minPrice = p.low;
+      if (p.high > maxPrice) maxPrice = p.high;
+    });
+    const priceRange = maxPrice - minPrice || 1;
+    const padding = priceRange * 0.10;
+    minPrice -= padding;
+    maxPrice += padding;
+    const cursorPrice = maxPrice - (y / pricePlotHeight) * (maxPrice - minPrice);
+
+    setHoverInfo({
+      candle,
+      x: idx * stepX + stepX / 2,
+      y,
+      price: cursorPrice
+    });
   };
 
+  const activeCandle = hoverInfo ? hoverInfo.candle : (candles.length > 0 ? candles[candles.length - 1] : null);
+  const spreadPoints = (commodity.price * 0.00018).toFixed(commodity.price < 100 ? 3 : 2);
+  const volumeDisplay = activeCandle && activeCandle.volume ? `${(activeCandle.volume / 1000).toFixed(1)}K` : '42.5K';
+  const rsiValue = (50 + Math.sin(commodity.price * 0.4) * 18).toFixed(1);
+
   return (
-    <div className="relative w-full bg-white rounded-xl border border-slate-200 p-3 shadow-xs">
-      <div className="flex flex-wrap justify-between items-center mb-3 gap-2">
-        <div className="flex items-center space-x-2">
-          <span className="text-xs font-bold px-2 py-1 bg-blue-50 text-blue-700 rounded-md">
+    <div className="relative w-full bg-[#0b0f19] rounded-2xl border border-slate-800 p-3 sm:p-4 shadow-xl select-none text-white">
+      <div className="flex flex-wrap justify-between items-center pb-3 mb-2 border-b border-slate-800/80 gap-2">
+        <div className="flex items-center space-x-2.5 flex-wrap gap-y-1">
+          <span className="text-xs font-black font-mono px-2 py-0.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded-md">
             {commodity.symbol}
           </span>
-          <span className="text-sm font-bold text-slate-800">{commodity.name}</span>
-          <span className="text-xs text-slate-400">({commodity.unit})</span>
+          <span className="text-sm font-bold text-slate-100">{commodity.name}</span>
+          
+          <div className="flex items-center gap-1.5 font-mono text-xs ml-1">
+            <span className={`font-black text-sm ${lastTickDir === 'up' ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {formatQuote(commodity.price)}
+            </span>
+            <span className={`text-[11px] font-bold ${commodity.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {commodity.change24h >= 0 ? '+' : ''}{commodity.change24h.toFixed(2)}%
+            </span>
+          </div>
+
+          <div className="hidden md:flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+            <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 rounded">Spread: {spreadPoints} pts</span>
+            <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 rounded">Vol: {volumeDisplay}</span>
+            <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 rounded text-blue-400">RSI: {rsiValue}</span>
+          </div>
         </div>
 
-        {hoverInfo ? (
-          <div className="flex items-center space-x-2 text-xs font-mono text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
-            <span>A: <strong className="text-slate-800">{hoverInfo.open.toFixed(2)}</strong></span>
-            <span>M: <strong className="text-emerald-600">{hoverInfo.high.toFixed(2)}</strong></span>
-            <span>B: <strong className="text-rose-600">{hoverInfo.low.toFixed(2)}</strong></span>
-            <span>F: <strong className="text-slate-800">{hoverInfo.close.toFixed(2)}</strong></span>
+        <div className="flex items-center space-x-2">
+          <div className="flex space-x-0.5 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px] font-mono font-bold">
+            {(['1M', '5M', '15M', '1H', '1D'] as const).map((tf) => (
+              <button
+                key={tf}
+                type="button"
+                onClick={() => handleSetTimeframe(tf)}
+                className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                  activeTimeframe === tf
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title={`Análise Gráfica ${tf}`}
+              >
+                {tf}
+              </button>
+            ))}
           </div>
-        ) : (
-          <div className="text-xs text-slate-500 flex items-center gap-1.5 font-medium">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            Mercado Virtual MZ (Em Direto)
+
+          <div className="flex space-x-0.5 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px] font-semibold">
+            <button
+              type="button"
+              onClick={() => handleSetChartType('candle')}
+              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                activeChartType === 'candle' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Velas
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetChartType('line')}
+              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                activeChartType === 'line' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Linha
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-lg bg-white border border-slate-100">
+      <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-slate-400 pb-2 px-1 gap-2">
+        {activeCandle ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            <span>Hora: <strong className="text-slate-200">{activeCandle.time}</strong></span>
+            <span>Abertura: <strong className="text-slate-200">{formatQuote(activeCandle.open)}</strong></span>
+            <span>Máxima: <strong className="text-emerald-400">{formatQuote(activeCandle.high)}</strong></span>
+            <span>Mínima: <strong className="text-rose-400">{formatQuote(activeCandle.low)}</strong></span>
+            <span>Fecho: <strong className="text-slate-200">{formatQuote(activeCandle.close)}</strong></span>
+          </div>
+        ) : (
+          <div>Carregando parâmetros técnicos...</div>
+        )}
+
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-sans">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Terminal Cotações Ao Vivo</span>
+        </div>
+      </div>
+
+      <div className="relative overflow-hidden rounded-xl bg-[#0b0f19] border border-slate-800/80">
         <canvas
           ref={canvasRef}
-          width={760}
-          height={height}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverInfo(null)}
-          className="w-full h-full cursor-crosshair block"
+          style={{ width: '100%', height: `${height}px` }}
+          className="cursor-crosshair block"
         />
       </div>
     </div>
   );
 };
-
-// Stable Clock Store for useSyncExternalStore (cached snapshot prevents re-render infinite loops)
-let cachedClockNow = typeof window !== 'undefined' ? Date.now() : 0;
-const clockListeners = new Set<() => void>();
-
-if (typeof window !== 'undefined') {
-  setInterval(() => {
-    cachedClockNow = Date.now();
-    clockListeners.forEach((cb) => cb());
-  }, 10000);
-}
-
-const subscribeToClock = (callback: () => void) => {
-  clockListeners.add(callback);
-  return () => {
-    clockListeners.delete(callback);
-  };
-};
-
-const getClockSnapshot = () => cachedClockNow;
-const getClockServerSnapshot = () => 0;
 
 // ==========================================
 // MAIN COMPONENT (PAGE)
@@ -717,18 +951,16 @@ const getClockServerSnapshot = () => 0;
 export default function Home() {
   const router = useRouter();
   const { user, userProfile, loading: authLoading, logout, updateBalance, isAdmin } = useAuth();
+  const profile = (userProfile || {}) as any;
 
-  // Global State (sem aba admin interna; admin separado em /admin)
   const [activeTab, setActiveTab] = useState<'inicio' | 'mercados' | 'carteira' | 'perfil'>('inicio');
   const [commodities, setCommodities] = useState<Commodity[]>(INITIAL_COMMODITIES);
   const [localBalance, setLocalBalance] = useState<number | null>(null);
-  // REGRA: Todas as contas iniciam com 0 MT
-  const balance = localBalance !== null ? localBalance : (userProfile?.saldoVirtual ?? 0.00);
+  const balance = localBalance !== null ? localBalance : (profile?.balance ?? profile?.saldoVirtual ?? 0.00);
   const [positions, setPositions] = useState<Position[]>([]);
   const [tradeHistory, setTradeHistory] = useState<ClosedTrade[]>([]);
   const [favorites, setFavorites] = useState<string[]>(['milho', 'brent', 'cashew', 'gold']);
   
-  // Dica do Instrutor Dinâmica (carregada do Firestore admin_config/instructor_tip em tempo real)
   const [customInstructorTip, setCustomInstructorTip] = useState<{
     title: string;
     badge: string;
@@ -743,11 +975,6 @@ export default function Home() {
     active: true
   });
 
-  // Market Simulation Engine (autônoma independente realista, sem manipulação de perdas forçadas)
-  const [simulationTrend] = useState<'bullish' | 'bearish' | 'neutral'>('neutral');
-  const [volatilityFactor] = useState<number>(1.0);
-
-  // Market Hours & Paused Assets Config (from Firestore admin_config/market_hours)
   const [marketHoursConfig, setMarketHoursConfig] = useState<{
     scheduleText: string;
     openHour: number;
@@ -762,7 +989,6 @@ export default function Home() {
     pausedAssets: {}
   });
 
-  // Global Announcement Config (from Firestore admin_config/announcement)
   const [globalAnnouncement, setGlobalAnnouncement] = useState<{
     active: boolean;
     title: string;
@@ -771,24 +997,17 @@ export default function Home() {
   } | null>(null);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState<boolean>(false);
 
-  // Modals & Active selections
   const [selectedAssetId, setSelectedAssetId] = useState<string>(INITIAL_COMMODITIES[0].id);
   const [isTradeModalOpen, setIsTradeModalOpen] = useState<boolean>(false);
   const [tradeSide, setTradeSide] = useState<'BUY' | 'SELL'>('BUY');
   const [tradeQty, setTradeQty] = useState<number>(1);
 
-  // Incremental ID generator ref for trades and positions to avoid impurity
   const counterRef = useRef(100);
 
-  // Client-side timestamp external store to maintain pure render for cooldown timer
-  const nowTimestamp = useSyncExternalStore(subscribeToClock, getClockSnapshot, getClockServerSnapshot);
-
-  // Active selected commodity derived cleanly
   const selectedAsset = useMemo(() => {
     return commodities.find((c) => c.id === selectedAssetId) || commodities[0];
   }, [commodities, selectedAssetId]);
 
-  // Market Trading Disabled Check (REGRA 3: Desabilitar Comprar/Vender fora do horário ou se pausado)
   const isCurrentAssetPaused = !!marketHoursConfig.pausedAssets[selectedAsset.id];
   const isGlobalMarketClosed = marketHoursConfig.globalMarketOpen === false;
   const isTradingDisabled = isGlobalMarketClosed || isCurrentAssetPaused;
@@ -796,13 +1015,11 @@ export default function Home() {
     ? 'Ativo Temporariamente Suspenso pela Administração'
     : `Mercado Fechado - ${marketHoursConfig.scheduleText || 'Abre às 21h'}`;
 
-  // UI Filters
   const [marketSearch, setMarketSearch] = useState<string>('');
   const [marketCategory, setMarketCategory] = useState<string>('Todos');
   const [selectedChartType, setSelectedChartType] = useState<'candle' | 'line'>('candle');
-  const [selectedTimeframe] = useState<string>('1m');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<'1M' | '5M' | '15M' | '1H' | '1D'>('5M');
 
-  // Toast Notification
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -810,9 +1027,6 @@ export default function Home() {
     setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
-  const [isFirebaseSyncing, setIsFirebaseSyncing] = useState<boolean>(false);
-
-  // Jogo 21h State (admin_config/daily)
   const [dailyConfig, setDailyConfig] = useState<{
     actionType: 'buy' | 'sell';
     date: string;
@@ -826,17 +1040,9 @@ export default function Home() {
     endHour: 21.5,
     forceOpen: false
   });
-  const [maputoTime, setMaputoTime] = useState<MaputoTimeDetails>(getMaputoTimeDetails());
-  const [isClaimingReward, setIsClaimingReward] = useState<boolean>(false);
-  const [claimedRewardInfo, setClaimedRewardInfo] = useState<{
-    increment: number;
-    newBalance: number;
-    action: 'buy' | 'sell';
-  } | null>(null);
+  const [maputoTime, setMaputoTime] = useState<MaputoTimeDetails>(() => getMaputoTimeDetails());
 
-  // ------------------------------------------
-  // CARTEIRA & DEPÓSITO / LEVANTAMENTOS (M-PESA / E-MOLA) STATE
-  // ------------------------------------------
+  // Carteira State
   const [carteiraSubTab, setCarteiraSubTab] = useState<'deposito' | 'visao-geral' | 'transacoes' | 'levantamentos' | 'fechadas'>('visao-geral');
   const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -849,7 +1055,7 @@ export default function Home() {
     referredEmail?: string;
     referredUid?: string;
   }>>([]);
-  const [withdrawalWindow, setWithdrawalWindow] = useState<WithdrawalWindowDetails>(getMaputoWithdrawalWindowDetails());
+  const [withdrawalWindow, setWithdrawalWindow] = useState<WithdrawalWindowDetails>(() => getMaputoWithdrawalWindowDetails());
   const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState<boolean>(false);
   const [withdrawalMethod, setWithdrawalMethod] = useState<'mpesa' | 'emola'>('mpesa');
   const [withdrawalPhone, setWithdrawalPhone] = useState<string>('');
@@ -873,34 +1079,28 @@ export default function Home() {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
-  // Código de Convite Garantido e Instantâneo
   const fallbackCode = user ? (user.uid.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'TRBONUS5') : 'TRBONUS5';
-  const displayInviteCode = userProfile?.inviteCode || fallbackCode;
+  const displayInviteCode = profile?.inviteCode || fallbackCode;
 
-  // Contabilidade em tempo real de convidados com 1º depósito e total de comissões ganhas (5%)
   const liveCommissionsSum = userCommissions.reduce((acc, c) => acc + (c.amount || 0), 0);
   const liveDepositedCount = userCommissions.length;
-  // REGRA: Apenas investidores que realizaram depósito contam nos convidados registados
-  const activeDepositedInvitedCount = Math.max(userProfile?.indicadosCount || 0, liveDepositedCount);
-  const totalCommissionsEarned = Math.max(userProfile?.totalComissoes || 0, liveCommissionsSum);
+  const activeDepositedInvitedCount = Math.max(profile?.indicadosCount || 0, liveDepositedCount);
+  const totalCommissionsEarned = Math.max(profile?.totalComissoes || 0, liveCommissionsSum);
 
-  // Se o usuário existir e ainda não tiver inviteCode no Firestore, salva em background
   useEffect(() => {
-    if (user && !userProfile?.inviteCode) {
+    if (user && !profile?.inviteCode) {
       const codeToSave = fallbackCode;
       const userRef = doc(db, 'users', user.uid);
       setDoc(userRef, { inviteCode: codeToSave }, { merge: true }).catch(() => {});
     }
-  }, [user, userProfile?.inviteCode, fallbackCode]);
+  }, [user, profile?.inviteCode, fallbackCode]);
 
-  // Route Protection: Redirect to /login if user is not authenticated
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/login');
     }
   }, [user, authLoading, router]);
 
-  // Pré-carregar chat em background quando o usuário está no Início (Performance <300ms)
   useEffect(() => {
     if (user) {
       const timer = setTimeout(() => {
@@ -910,7 +1110,6 @@ export default function Home() {
     }
   }, [user]);
 
-  // Real-time Firestore Listeners: Market Hours, Announcements & Daily 21h Window
   useEffect(() => {
     const marketDocRef = doc(db, 'admin_config', 'market_hours');
     const unsubMarket = onSnapshot(marketDocRef, (snap) => {
@@ -953,7 +1152,6 @@ export default function Home() {
       }
     }, (e) => console.warn('Erro ao carregar daily config:', e));
 
-    // Dica do Instrutor em tempo real (doc: config/dicaInstrutor)
     const dicaDocRef = doc(db, 'config', 'dicaInstrutor');
     const unsubDica = onSnapshot(dicaDocRef, (snap) => {
       if (snap.exists()) {
@@ -962,11 +1160,10 @@ export default function Home() {
           title: 'Dica do Instrutor',
           badge: d.tipo || 'Dica de Ouro',
           author: d.instrutor || 'Instrutor Mateus Maputo',
-          content: d.texto || d.content || 'Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores para proteger o seu capital virtual!',
+          content: d.texto || d.content || 'Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores para proteger o seu capital!',
           active: true
         });
       } else {
-        // Fallback para admin_config/instructor_tip se o doc ainda não tiver sido gravado
         const tipDocRef = doc(db, 'admin_config', 'instructor_tip');
         getDoc(tipDocRef).then((oldSnap) => {
           if (oldSnap.exists()) {
@@ -975,7 +1172,7 @@ export default function Home() {
               title: d.title || 'Dica do Instrutor',
               badge: d.badge || 'Dica de Ouro',
               author: d.author || 'Instrutor Mateus Maputo',
-              content: d.content || 'Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores para proteger o seu capital virtual!',
+              content: d.content || 'Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores para proteger o seu capital!',
               active: d.active !== false
             });
           }
@@ -997,11 +1194,9 @@ export default function Home() {
     };
   }, []);
 
-  // Real-time listener para Transações e Levantamentos do Usuário
   useEffect(() => {
     if (!user?.uid) return;
 
-    // Listen transactions
     const txRef = collection(db, 'transactions');
     const qTx = query(txRef, limit(100));
     const unsubTx = onSnapshot(qTx, (snapshot) => {
@@ -1020,7 +1215,6 @@ export default function Home() {
       setUserTransactions(list);
     }, (e) => console.warn('Erro ao escutar transações:', e));
 
-    // Listen withdrawals em tempo real
     const wRef = collection(db, 'withdrawals');
     const unsubW = onSnapshot(wRef, (snapshot) => {
       const list: WithdrawalRecord[] = [];
@@ -1036,27 +1230,8 @@ export default function Home() {
         return tB - tA;
       });
       setUserWithdrawals(list);
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('taprise_user_withdrawals', JSON.stringify(list));
-        } catch {}
-      }
-    }, (e) => {
-      console.warn('Erro ao escutar levantamentos:', e);
-      // Fallback via getDocs se onSnapshot atrasar
-      getDocs(collection(db, 'withdrawals')).then((snap) => {
-        const list: WithdrawalRecord[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.uid === user.uid || data.userId === user.uid || (user.email && data.userEmail === user.email)) {
-            list.push({ id: d.id, ...data } as WithdrawalRecord);
-          }
-        });
-        setUserWithdrawals(list);
-      }).catch(() => {});
-    });
+    }, (e) => console.warn('Erro ao escutar levantamentos:', e));
 
-    // Listen commissions em tempo real (Garante contagem exata de convidados com 1º depósito e soma de comissões)
     const commRef = collection(db, 'commissions');
     const unsubComm = onSnapshot(commRef, (snapshot) => {
       const list: Array<{ id: string; amount: number; referredName?: string; referredEmail?: string; referredUid?: string }> = [];
@@ -1073,25 +1248,7 @@ export default function Home() {
         }
       });
       setUserCommissions(list);
-    }, (e) => {
-      console.warn('Erro ao escutar comissões:', e);
-      getDocs(collection(db, 'commissions')).then((snap) => {
-        const list: Array<{ id: string; amount: number; referredName?: string; referredEmail?: string; referredUid?: string }> = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.referrerUid === user.uid) {
-            list.push({
-              id: d.id,
-              amount: Number(data.commissionAmount || 0),
-              referredName: data.referredName || '',
-              referredEmail: data.referredEmail || '',
-              referredUid: data.referredUid || ''
-            });
-          }
-        });
-        setUserCommissions(list);
-      }).catch(() => {});
-    });
+    }, (e) => console.warn('Erro ao escutar comissões:', e));
 
     return () => {
       unsubTx();
@@ -1100,81 +1257,6 @@ export default function Home() {
     };
   }, [user?.uid, user?.email]);
 
-  // Lógica do Usuário - 1 VEZ POR DIA (Janela 21h):
-  const todayMaputoStr = maputoTime.dateStr;
-  const userClaimedToday = userProfile?.lastClaimDate === todayMaputoStr;
-  const is21hWindowActive = maputoTime.isInWindow || dailyConfig.forceOpen;
-
-  // Ação de Coleta da Recompensa Crescente do Jogo 21h
-  const handleClaimDailyReward = async () => {
-    if (!user) {
-      showToast('Por favor, inicie sessão para coletar o seu lucro.', 'error');
-      return;
-    }
-
-    if (userClaimedToday) {
-      showToast('Você já coletou hoje! Volte amanhã às 21h.', 'info');
-      return;
-    }
-
-    if (!is21hWindowActive) {
-      showToast('Mercado Fechado - Volta às 21h.', 'error');
-      return;
-    }
-
-    if (isClaimingReward) return;
-
-    try {
-      setIsClaimingReward(true);
-      const saldoAtual = Number(balance ?? userProfile?.balance ?? userProfile?.saldoVirtual ?? 0);
-      const { increment, newBalance } = calculate21hIncrement(saldoAtual);
-      const hoje = getMaputoTodayDate();
-
-      // 1. Atualizar users/{uid}: balance e lastClaimDate
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        balance: newBalance,
-        saldoVirtual: newBalance,
-        patrimonioTotal: newBalance,
-        lastClaimDate: hoje,
-        atualizadoEm: serverTimestamp()
-      });
-
-      // 2. Criar log na coleção transactions do tipo bonus_21h
-      await addDoc(collection(db, 'transactions'), {
-        uid: user.uid,
-        userId: user.uid,
-        userEmail: user.email || '',
-        userName: userProfile?.nome || 'Investidor TapRise',
-        type: 'bonus_21h',
-        amount: increment,
-        oldBalance: saldoAtual,
-        newBalance: newBalance,
-        date: hoje,
-        actionType: dailyConfig.actionType,
-        timestamp: serverTimestamp(),
-        description: `Lucro de Trading 21h (${dailyConfig.actionType === 'buy' ? 'COMPRAR' : 'VENDER'}): +${increment} MT`
-      });
-
-      // 3. Atualizar saldo local imediatamente
-      setLocalBalance(newBalance);
-      updateBalance(newBalance);
-      setClaimedRewardInfo({
-        increment,
-        newBalance,
-        action: dailyConfig.actionType
-      });
-
-      showToast(`+${increment} MT de Lucro Creditados com Sucesso! Seu novo saldo é ${newBalance.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT.`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao coletar recompensa 21h:', err);
-      showToast(`Erro na coleta: ${err.message || 'Falha na ligação'}`, 'error');
-    } finally {
-      setIsClaimingReward(false);
-    }
-  };
-
-  // Analytics initializer
   useEffect(() => {
     initAnalytics();
   }, []);
@@ -1184,55 +1266,49 @@ export default function Home() {
     router.push('/login');
   };
 
-  const testFirebaseConnection = async () => {
-    try {
-      setIsFirebaseSyncing(true);
-      const testRef = doc(db, 'system', 'connection_test');
-      await getDoc(testRef);
-      showToast('Conexão aos Servidores Centrais TapRise verificada com sucesso! 🚀', 'success');
-    } catch {
-      showToast('Servidores Centrais TapRise operacionais e sincronizados! ✅', 'success');
-    } finally {
-      setIsFirebaseSyncing(false);
-    }
-  };
+  // Motor com Momentum e Ondas Distintas por Ativo (Variações Notáveis e Proporcionais)
+  const assetMomentumRef = useRef<Record<string, { momentum: number; stepsLeft: number }>>({});
 
-  // ------------------------------------------
-  // REAL-TIME MARKET SIMULATION TICK ENGINE
-  // ------------------------------------------
   useEffect(() => {
     const interval = setInterval(() => {
       setCommodities((prevCommodities) =>
         prevCommodities.map((item) => {
-          // Trend offset
-          let trendBias = 0;
-          if (simulationTrend === 'bullish') trendBias = 0.002;
-          if (simulationTrend === 'bearish') trendBias = -0.002;
+          if (!assetMomentumRef.current[item.id] || assetMomentumRef.current[item.id].stepsLeft <= 0) {
+            const seed = getAssetSeed(item.id);
+            const isBullTrend = Math.random() < (seed.drift > 0 ? 0.58 : 0.42);
+            const direction = isBullTrend ? 1 : -1;
+            const strength = (0.003 + Math.random() * 0.008) * (item.baseVolatility / 0.012);
+            assetMomentumRef.current[item.id] = {
+              momentum: direction * strength,
+              stepsLeft: Math.floor(3 + Math.random() * 5)
+            };
+          }
 
-          const baseVol = item.baseVolatility || 0.005;
-          const randomFactor = (Math.random() - 0.49 + trendBias) * baseVol * volatilityFactor;
-          const newPrice = Math.max(0.1, item.price * (1 + randomFactor));
-          const change24h = item.change24h + (randomFactor * 100);
+          const currentWave = assetMomentumRef.current[item.id];
+          currentWave.stepsLeft -= 1;
+
+          const jitter = (Math.random() - 0.495) * (item.baseVolatility * 0.6);
+          const percentDelta = currentWave.momentum + jitter;
+
+          const newPrice = Math.max(0.01, Number((item.price * (1 + percentDelta)).toFixed(item.price < 100 ? 3 : 2)));
+          
+          const baseOpen = item.open || (item.price * 0.98);
+          const calcChange24h = Number((((newPrice - baseOpen) / baseOpen) * 100).toFixed(2));
 
           return {
             ...item,
-            price: Number(newPrice.toFixed(2)),
-            change24h: Number(change24h.toFixed(2)),
+            price: newPrice,
+            change24h: calcChange24h,
             high: Math.max(item.high, newPrice),
             low: Math.min(item.low, newPrice)
           };
         })
       );
-    }, 2400);
+    }, 2200);
 
     return () => clearInterval(interval);
-  }, [simulationTrend, volatilityFactor]);
+  }, []);
 
-  // ------------------------------------------
-  // FINANCIAL CALCULATIONS
-  // ------------------------------------------
-
-  // Unrealized PnL
   const unrealizedPnL = useMemo(() => {
     return positions.reduce((acc, pos) => {
       const currentAsset = commodities.find((c) => c.id === pos.assetId);
@@ -1244,45 +1320,27 @@ export default function Home() {
     }, 0);
   }, [positions, commodities]);
 
-  // Total Portfolio Value
   const portfolioValue = useMemo(() => {
     return balance + unrealizedPnL;
   }, [balance, unrealizedPnL]);
 
-  // Realized PnL
   const realizedPnL = useMemo(() => {
     return tradeHistory.reduce((acc, trade) => acc + trade.pnl, 0);
   }, [tradeHistory]);
 
-  // Return % calculated against initial 1,000 MT
-  const totalReturnPercent = useMemo(() => {
-    const initialCapital = 1000.00;
-    return ((portfolioValue - initialCapital) / initialCapital) * 100;
-  }, [portfolioValue]);
-
-  // ------------------------------------------
-  // CARTEIRA & REGRAS DE RETIRADA
-  // ------------------------------------------
-  // ------------------------------------------
-  // ------------------------------------------
-  // CARTEIRA & REGRAS DE RETIRADA
-  // ------------------------------------------
-  // Reserva mínima que SEMPRE deve sobrar na conta: 1.000,00 MT
   const reserveAmount = 1000.00;
-  // Saldo passível de levantamento considerando taxa de 5%: V * 1.05 <= balance - 1000, com teto máximo de 2.000 MT
   const rawWithdrawable = Math.max(0, Math.floor(((balance - reserveAmount) / 1.05) * 100) / 100);
   const withdrawableBalance = Math.min(2000, rawWithdrawable);
 
-  // Regra de Intervalo Obrigatório: 1 levantamento a cada 3 dias (72 horas)
   const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
   const lastWithdrawal = userWithdrawals && userWithdrawals.length > 0 ? userWithdrawals[0] : null;
   const lastWithdrawalTime = lastWithdrawal
     ? (lastWithdrawal.requestedAt?.toMillis ? lastWithdrawal.requestedAt.toMillis() : (lastWithdrawal.requestedAt?.seconds ? lastWithdrawal.requestedAt.seconds * 1000 : (lastWithdrawal.requestedAt ? new Date(lastWithdrawal.requestedAt).getTime() : 0)))
     : 0;
 
-  const effectiveNow = nowTimestamp || 0;
-  const timeSinceLastWithdrawal = effectiveNow > 0 && lastWithdrawalTime > 0 ? effectiveNow - lastWithdrawalTime : 0;
-  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && effectiveNow > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
+  const nowMs = Date.now();
+  const timeSinceLastWithdrawal = nowMs > 0 && lastWithdrawalTime > 0 ? nowMs - lastWithdrawalTime : 0;
+  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && nowMs > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
   const remainingCooldownMs = isWithdrawalCooldownActive ? THREE_DAYS_MS - timeSinceLastWithdrawal : 0;
 
   const getCooldownLabel = (ms: number) => {
@@ -1295,7 +1353,6 @@ export default function Home() {
     return `${Math.max(1, mins)} minuto(s)`;
   };
 
-  // Valor total alocado em posições ativas
   const positionsAllocatedMargin = useMemo(() => {
     return positions.reduce((acc, pos) => {
       const posCost = pos.type === 'BUY' ? pos.entryPrice * pos.quantity : pos.entryPrice * pos.quantity * 0.2;
@@ -1303,7 +1360,6 @@ export default function Home() {
     }, 0);
   }, [positions]);
 
-  // Executar Pedido de Levantamento (M-Pesa / e-Mola)
   const handleExecuteWithdrawal = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!user) {
@@ -1311,14 +1367,12 @@ export default function Home() {
       return;
     }
 
-    // 1. Validar Janela de Horário Oficial de Maputo (08:00 às 12:00)
     const windowStatus = getMaputoWithdrawalWindowDetails();
     if (!windowStatus.isOpen) {
       showToast('O levantamento só pode ser feito das 8h às 12h todos os dias (Hora de Moçambique Maputo).', 'error');
       return;
     }
 
-    // 2. Validar Intervalo de 3 Dias entre levantamentos
     if (isWithdrawalCooldownActive) {
       showToast(
         `Regra de Segurança: Só é permitido solicitar um novo levantamento após 3 dias do último pedido. Próximo levantamento desbloqueado em: ${getCooldownLabel(remainingCooldownMs)}.`,
@@ -1327,7 +1381,6 @@ export default function Home() {
       return;
     }
 
-    // 3. Validar Montante (Mínimo de 300,00 MT e Máximo de 2.000,00 MT)
     const numAmount = parseFloat(withdrawalAmount);
     if (isNaN(numAmount) || numAmount < 300) {
       showToast('O valor mínimo de levantamento é de 300,00 MT.', 'error');
@@ -1339,12 +1392,10 @@ export default function Home() {
       return;
     }
 
-    // 4. Taxa de 5% sobre o valor levantado (cortada do saldo que sobra na conta)
     const fee = Math.round(numAmount * 0.05 * 100) / 100;
     const totalDebitado = Number((numAmount + fee).toFixed(2));
     const saldoRestante = Number((balance - totalDebitado).toFixed(2));
 
-    // 5. Validar Reserva Obrigatória de 1.000 MT: sempre deve sobrar 1000 MT na conta
     if (saldoRestante < 1000) {
       showToast(
         `Regra TapRise: O levantamento foi recusado porque deve sempre sobrar no mínimo 1.000,00 MT na conta após o levantamento e a taxa de 5% (${fee.toFixed(2)} MT). Com o saldo atual de ${balance.toFixed(2)} MT, restariam apenas ${saldoRestante.toFixed(2)} MT.`,
@@ -1353,14 +1404,12 @@ export default function Home() {
       return;
     }
 
-    // 6. Validar Nome Completo do Titular
     const cleanName = withdrawalName.trim();
     if (!cleanName || cleanName.length < 3) {
       showToast('Por favor, informe o seu nome completo de confirmação do titular da conta.', 'error');
       return;
     }
 
-    // 7. Validar Número de Telefone (M-Pesa 84/85 ou e-Mola 86/87)
     const cleanPhone = withdrawalPhone.replace(/\D/g, '');
     if (withdrawalMethod === 'mpesa') {
       if (cleanPhone.length !== 9 || (!cleanPhone.startsWith('84') && !cleanPhone.startsWith('85'))) {
@@ -1382,7 +1431,6 @@ export default function Home() {
       const hoje = getMaputoTodayDate();
       const operatorLabel = withdrawalMethod === 'mpesa' ? 'M-Pesa' : 'e-Mola';
 
-      // A. Atualizar saldo do usuário em users/{uid} com lastWithdrawalAt
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
         balance: newBal,
@@ -1392,7 +1440,6 @@ export default function Home() {
         atualizadoEm: serverTimestamp()
       });
 
-      // Sincronizar também usuarios/{uid}
       try {
         await updateDoc(doc(db, 'usuarios', user.uid), {
           saldoDisponivel: newBal,
@@ -1400,7 +1447,6 @@ export default function Home() {
         });
       } catch {}
 
-      // B. Registar pedido na coleção 'withdrawals'
       const withdrawalDocRef = await addDoc(collection(db, 'withdrawals'), {
         uid: user.uid,
         userId: user.uid,
@@ -1421,7 +1467,6 @@ export default function Home() {
         dateStr: hoje,
       });
 
-      // C. Registar na coleção 'transactions'
       await addDoc(collection(db, 'transactions'), {
         uid: user.uid,
         userId: user.uid,
@@ -1441,11 +1486,11 @@ export default function Home() {
         description: `Pedido de Levantamento via ${operatorLabel} (${cleanPhone}): ${numAmount.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT (Taxa 5%: ${fee.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT | Total cortado: ${totalDebitado.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT)`
       });
 
-      // D. Atualizar saldo local
       setLocalBalance(newBal);
-      updateBalance(newBal);
+      if (updateBalance) {
+        updateBalance(newBal, newBal + unrealizedPnL);
+      }
 
-      // E. Definir dados de sucesso e abrir feedback
       setWithdrawalSuccessData({
         id: withdrawalDocRef.id,
         amount: numAmount,
@@ -1464,11 +1509,7 @@ export default function Home() {
     }
   };
 
-  // ------------------------------------------
-  // TRADE EXECUTION LOGIC
-  // ------------------------------------------
   const executeTrade = () => {
-    // REGRA 3: Não permite Comprar/Vender quando fora do horário ou se o ativo estiver pausado
     if (isTradingDisabled) {
       showToast(tradingDisabledReason, 'error');
       return;
@@ -1482,12 +1523,12 @@ export default function Home() {
     const cost = selectedAsset.price * tradeQty;
 
     if (tradeSide === 'BUY' && cost > balance) {
-      showToast('Saldo virtual insuficiente em Meticais (MT)!', 'error');
+      showToast('Saldo disponível insuficiente em Meticais (MT)!', 'error');
       return;
     }
 
     if (tradeSide === 'SELL' && cost * 0.2 > balance) {
-      showToast('Margem virtual insuficiente (20% de caução necessária)!', 'error');
+      showToast('Margem de garantia insuficiente (20% de caução necessária)!', 'error');
       return;
     }
 
@@ -1503,7 +1544,7 @@ export default function Home() {
     if (tradeSide === 'BUY') {
       const newBal = balance - cost;
       setLocalBalance(newBal);
-      updateBalance(newBal, newBal + unrealizedPnL);
+      if (updateBalance) updateBalance(newBal, newBal + unrealizedPnL);
 
       const newPosition: Position = {
         id: counterRef.current,
@@ -1520,11 +1561,10 @@ export default function Home() {
       setPositions((prev) => [newPosition, ...prev]);
       showToast(`Compra realizada: ${tradeQty}x ${selectedAsset.symbol} por ${formatMT(cost)}`);
     } else {
-      // Short / Venda Virtual
       const margin = cost * 0.2;
       const newBal = balance - margin;
       setLocalBalance(newBal);
-      updateBalance(newBal, newBal + unrealizedPnL);
+      if (updateBalance) updateBalance(newBal, newBal + unrealizedPnL);
 
       const newPosition: Position = {
         id: counterRef.current,
@@ -1539,15 +1579,14 @@ export default function Home() {
       };
 
       setPositions((prev) => [newPosition, ...prev]);
-      showToast(`Venda a descoberto aberta: ${tradeQty}x ${selectedAsset.symbol} (Margem: ${formatMT(margin)})`);
+      showToast(`Posição de venda aberta: ${tradeQty}x ${selectedAsset.symbol} (Margem: ${formatMT(margin)})`);
     }
 
-    // Registar na coleção 'orders' para monitorização do admin em tempo real
     if (user) {
       addDoc(collection(db, 'orders'), {
         orderId: counterRef.current,
         userId: user.uid,
-        userName: userProfile?.nome || 'Investidor TapRise',
+        userName: profile?.nome || 'Investidor TapRise',
         userEmail: user.email || '',
         assetId: selectedAsset.id,
         assetName: selectedAsset.name,
@@ -1571,7 +1610,6 @@ export default function Home() {
     const priceDiff = currentAsset.price - position.entryPrice;
     const pnl = position.type === 'BUY' ? priceDiff * position.quantity : -priceDiff * position.quantity;
 
-    // Refund capital + PnL
     let returnedCapital = 0;
     if (position.type === 'BUY') {
       returnedCapital = (position.entryPrice * position.quantity) + pnl;
@@ -1581,13 +1619,12 @@ export default function Home() {
 
     const newBal = Math.max(0, balance + returnedCapital);
     setLocalBalance(newBal);
-    updateBalance(newBal, newBal + (unrealizedPnL - pnl));
+    if (updateBalance) updateBalance(newBal, newBal + (unrealizedPnL - pnl));
 
     counterRef.current += 1;
     const now = new Date();
     const timeString = `${now.toLocaleDateString('pt-MZ')} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-    // Log Trade
     const closedTrade: ClosedTrade = {
       id: counterRef.current,
       symbol: position.symbol,
@@ -1610,29 +1647,12 @@ export default function Home() {
     }
   };
 
-  const resetAccount = () => {
-    setLocalBalance(1000.00);
-    setPositions([]);
-    setTradeHistory([]);
-    updateBalance(1000.00, 1000.00);
-    showToast('Conta virtual reiniciada para 1.000,00 MT.');
-  };
-
-  const addVirtualFunds = (amount: number) => {
-    const newBal = balance + amount;
-    setLocalBalance(newBal);
-    updateBalance(newBal, newBal + unrealizedPnL);
-    showToast(`Recarga de +${formatMT(amount)} creditada na banca de testes!`);
-  };
-
   const toggleFavorite = (assetId: string) => {
     setFavorites((prev) =>
       prev.includes(assetId) ? prev.filter((id) => id !== assetId) : [...prev, assetId]
     );
   };
 
-
-  // Filtered market list
   const filteredCommodities = commodities.filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(marketSearch.toLowerCase()) ||
@@ -1640,8 +1660,6 @@ export default function Home() {
     const matchesCat = marketCategory === 'Todos' || c.category === marketCategory;
     return matchesSearch && matchesCat;
   });
-
-
 
   if (authLoading) {
     return (
@@ -1682,17 +1700,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* 1. TOPO NOVO - ULTRA PROFISSIONAL (56px, background branco, shadow suave) */}
-      <header className="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-xs h-14">
+      {/* 1. TOPO DA PLATAFORMA */}
+      <header className="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-sm h-14">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
-          
-          {/* Esquerda: [TR logo quadrado azul #2563eb radius 10] [TapRise Bold 16px] [badge "AO VIVO" verde com ponto piscando ●] */}
           <div
             className="flex items-center space-x-2.5 cursor-pointer select-none"
             onClick={() => setActiveTab('inicio')}
             title="Ir para o Início"
           >
-            <div className="w-9 h-9 bg-[#2563eb] rounded-[10px] text-white font-black text-sm flex items-center justify-center shadow-xs shrink-0">
+            <div className="w-9 h-9 bg-[#2563eb] rounded-[10px] text-white font-black text-sm flex items-center justify-center shadow-sm shrink-0">
               TR
             </div>
             <div className="flex flex-col justify-center">
@@ -1711,21 +1727,18 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Direita: 3 ícones só, sem frases: [💬 com dot verde online] [📈] [Avatar "A" azul] [↗️ sair] - Tudo 36px circular */}
           <div className="flex items-center space-x-1.5">
-            {/* Se for Admin exclusivo, mantém ícone de acesso rápido */}
             {isAdmin && (
               <Link
                 href="/admin"
                 prefetch={true}
-                className="w-9 h-9 rounded-full flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer shadow-xs shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer shadow-sm shrink-0"
                 title="Painel Administrativo Central (/admin)"
               >
                 <Shield className="w-4 h-4 text-amber-600" />
               </Link>
             )}
 
-            {/* [💬 com dot verde online] */}
             <Link
               href="/chat"
               prefetch={true}
@@ -1736,7 +1749,6 @@ export default function Home() {
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
             </Link>
 
-            {/* [📈] Mercados / Negociação */}
             <button
               onClick={() => setActiveTab('mercados')}
               className={`w-9 h-9 rounded-full flex items-center justify-center transition cursor-pointer shrink-0 ${
@@ -1749,16 +1761,14 @@ export default function Home() {
               <TrendingUp className="w-4 h-4" />
             </button>
 
-            {/* [Avatar "A" azul] Perfil */}
             <button
               onClick={() => setActiveTab('perfil')}
-              className="w-9 h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0"
+              className="w-9 h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-sm hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0"
               title="Perfil do Investidor"
             >
-              {userProfile?.nome ? userProfile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')}
+              {profile?.nome ? profile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')}
             </button>
 
-            {/* [↗️ sair] Terminar Sessão */}
             <button
               onClick={handleLogout}
               className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer shrink-0"
@@ -1770,7 +1780,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* GLOBAL ANNOUNCEMENT BANNER (ABA 4 - TRANSMITIDO EM TEMPO REAL) */}
+      {/* GLOBAL ANNOUNCEMENT BANNER */}
       {globalAnnouncement?.active && !dismissedAnnouncement && (
         <div
           className={`px-4 py-2.5 text-xs font-semibold shadow-md flex items-center justify-between border-b ${
@@ -1802,33 +1812,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* Guest Mode Banner */}
-      {user?.isAnonymous && (
-        <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white px-4 py-2 text-xs font-medium shadow-xs">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-2 truncate mr-3">
-              <Info className="w-4 h-4 text-amber-300 shrink-0" />
-              <span className="truncate">
-                Está em Modo Visitante Provisório. Crie a sua conta de investidor para guardar o seu portfólio e histórico.
-              </span>
-            </div>
-            <Link
-              href="/register"
-              prefetch={true}
-              className="px-3 py-1 bg-amber-400 hover:bg-amber-300 text-slate-900 rounded-lg font-bold text-xs shrink-0 transition"
-            >
-              Criar Conta Gratuita
-            </Link>
-          </div>
-        </div>
-      )}
-
       {/* LAYOUT CONTAINER */}
       <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col md:flex-row gap-6">
         
         {/* DESKTOP SIDEBAR NAVIGATION */}
         <aside className="hidden md:flex flex-col w-56 shrink-0 space-y-4">
-          <nav className="space-y-1 bg-white p-2 rounded-2xl border border-slate-200 shadow-xs">
+          <nav className="space-y-1 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             {[
               { id: 'inicio', label: 'Início', icon: BarChart2 },
               { id: 'mercados', label: 'Mercados', icon: TrendingUp },
@@ -1881,7 +1870,6 @@ export default function Home() {
             )}
           </nav>
 
-          {/* Quick Moz Market Widget */}
           <div className="bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-4 text-white space-y-3 shadow-md">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-blue-200">Destaque Nacional</span>
@@ -1893,7 +1881,7 @@ export default function Home() {
                 {formatMT(commodities.find((c) => c.id === 'cashew')?.price || 95.50)}
               </p>
               <p className="text-xs text-emerald-400 font-semibold mt-0.5">
-                +{(commodities.find((c) => c.id === 'cashew')?.change24h || 4.8).toFixed(2)}% nas últimas 24h
+                +{(commodities.find((c) => c.id === 'cashew')?.change24h || 5.4).toFixed(2)}% nas últimas 24h
               </p>
             </div>
             <button
@@ -1902,14 +1890,13 @@ export default function Home() {
                 setTradeSide('BUY');
                 setIsTradeModalOpen(true);
               }}
-              className="w-full py-2 bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1"
+              className="w-full py-2 bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1 cursor-pointer"
             >
               <span>Negociar Agora</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Market Execution Info */}
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-900 space-y-1">
             <p className="font-bold flex items-center gap-1">
               <Info className="w-3.5 h-3.5 text-blue-600" />
@@ -1927,10 +1914,8 @@ export default function Home() {
           {/* 1. INÍCIO / DASHBOARD */}
           {activeTab === 'inicio' && (
             <div className="space-y-6">
-              {/* 2. CARDS PATRIMÔNIO - OTIMIZADO COM ÍCONES (Grid 2x2 desktop, 1 col mobile, gap 12px) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Card 1: TOTAL */}
-                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-xs flex flex-col justify-between">
+                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-sm flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       TOTAL
@@ -1949,12 +1934,11 @@ export default function Home() {
                     )}
                   </div>
                   <span className="text-[11px] text-slate-500 leading-tight">
-                    Virtual + Posições
+                    Operacional + Posições
                   </span>
                 </div>
 
-                {/* Card 2: DISPONÍVEL */}
-                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-xs flex flex-col justify-between">
+                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-sm flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       DISPONÍVEL
@@ -1977,8 +1961,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* Card 3: NÃO REALIZ. */}
-                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-xs flex flex-col justify-between">
+                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-sm flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       NÃO REALIZ.
@@ -2003,8 +1986,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* Card 4: REALIZADO */}
-                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-xs flex flex-col justify-between">
+                <div className="bg-white rounded-2xl border border-[#f1f5f9] p-3.5 shadow-sm flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       REALIZADO
@@ -2030,9 +2012,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* ======================================================== */}
-              {/* SESSÃO 21H: TERMINAL FOREX & JANELA OPERACIONAL (24/24H) */}
-              {/* ======================================================== */}
+              {/* TERMINAL OPERACIONAL 21H */}
               <Janela21hTerminal
                 dailyConfig={dailyConfig}
                 onOrderExecuted={(newBal) => {
@@ -2043,20 +2023,18 @@ export default function Home() {
 
               {/* Chart & Quick Watchlist */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Main Interactive Chart Box */}
-                <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div>
-                      <h2 className="text-base font-bold text-slate-900">Gráfico Interativo de Mercado</h2>
-                      <p className="text-xs text-slate-500">Cotação técnica ao segundo em Meticais (MT)</p>
+                      <h2 className="text-base font-bold text-slate-900">Terminal Gráfico de Mercado</h2>
+                      <p className="text-xs text-slate-500">Análise técnica com parâmetros oficiais de cotação e grade profissional</p>
                     </div>
 
                     <div className="flex items-center space-x-2">
                       <select
                         value={selectedAsset.id}
                         onChange={(e) => setSelectedAssetId(e.target.value)}
-                        className="bg-slate-100 text-xs font-bold text-slate-700 px-3 py-1.5 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                        className="bg-slate-100 text-xs font-bold text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
                       >
                         {commodities.map((item) => (
                           <option key={item.id} value={item.id}>
@@ -2064,25 +2042,6 @@ export default function Home() {
                           </option>
                         ))}
                       </select>
-
-                      <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-semibold">
-                        <button
-                          onClick={() => setSelectedChartType('candle')}
-                          className={`px-2.5 py-1 rounded-md transition ${
-                            selectedChartType === 'candle' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
-                          }`}
-                        >
-                          Velas
-                        </button>
-                        <button
-                          onClick={() => setSelectedChartType('line')}
-                          className={`px-2.5 py-1 rounded-md transition ${
-                            selectedChartType === 'line' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
-                          }`}
-                        >
-                          Linha
-                        </button>
-                      </div>
                     </div>
                   </div>
 
@@ -2090,7 +2049,9 @@ export default function Home() {
                     commodity={selectedAsset}
                     chartType={selectedChartType}
                     timeframe={selectedTimeframe}
-                    height={260}
+                    onTimeframeChange={(tf) => setSelectedTimeframe(tf)}
+                    onChartTypeChange={(ct) => setSelectedChartType(ct)}
+                    height={300}
                   />
 
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -2146,14 +2107,13 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Favorites Watchlist */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-slate-900">Favoritos de Moçambique</h3>
                       <button
                         onClick={() => setActiveTab('mercados')}
-                        className="text-xs text-blue-600 font-semibold hover:underline"
+                        className="text-xs text-blue-600 font-semibold hover:underline cursor-pointer"
                       >
                         Ver todos
                       </button>
@@ -2168,7 +2128,7 @@ export default function Home() {
                             onClick={() => setSelectedAssetId(asset.id)}
                             className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition ${
                               selectedAsset.id === asset.id
-                                ? 'border-blue-500 bg-blue-50/60 shadow-xs'
+                                ? 'border-blue-500 bg-blue-50/60 shadow-sm'
                                 : 'border-slate-100 hover:bg-slate-50'
                             }`}
                           >
@@ -2192,9 +2152,8 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Educational Signals Box - Dica do Instrutor Dinâmica do Firestore */}
                   {customInstructorTip.active && (
-                    <div className="bg-blue-50/90 rounded-2xl p-4 border border-blue-100 space-y-2.5 shadow-xs">
+                    <div className="bg-blue-50/90 rounded-2xl p-4 border border-blue-100 space-y-2.5 shadow-sm">
                       <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
                         <div className="flex items-center space-x-1.5">
                           <BookOpen className="w-4 h-4 text-[#2563eb]" />
@@ -2217,7 +2176,7 @@ export default function Home() {
               </div>
 
               {/* Active Positions Summary */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <h3 className="text-base font-bold text-slate-900">Posições Abertas</h3>
@@ -2227,7 +2186,7 @@ export default function Home() {
                   </div>
                   <button
                     onClick={() => setActiveTab('carteira')}
-                    className="text-xs font-semibold text-blue-600 hover:underline"
+                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                   >
                     Abrir Diário de Carteira
                   </button>
@@ -2239,7 +2198,7 @@ export default function Home() {
                     <p>Nenhuma posição aberta de momento.</p>
                     <button
                       onClick={() => setActiveTab('mercados')}
-                      className="px-4 py-1.5 bg-blue-50 text-blue-600 font-bold rounded-lg hover:bg-blue-100 transition"
+                      className="px-4 py-1.5 bg-blue-50 text-blue-600 font-bold rounded-lg hover:bg-blue-100 transition cursor-pointer"
                     >
                       Explorar Mercados
                     </button>
@@ -2289,7 +2248,7 @@ export default function Home() {
                               <td className="py-3 text-right">
                                 <button
                                   onClick={() => closePosition(pos)}
-                                  className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg transition text-xs"
+                                  className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg transition text-xs cursor-pointer"
                                 >
                                   Fechar
                                 </button>
@@ -2304,13 +2263,11 @@ export default function Home() {
               </div>
             </div>
           )}
-
+          
           {/* 2. MERCADOS (COMMODITIES MARKET) */}
           {activeTab === 'mercados' && (
             <div className="space-y-6">
-              
-              {/* Header & Search */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <div>
                   <h1 className="text-xl font-black text-slate-900">Mercado de Matérias-Primas</h1>
                   <p className="text-xs text-slate-500">Cotações oficiais e instrumentos negociáveis em Moçambique</p>
@@ -2336,7 +2293,7 @@ export default function Home() {
                   <button
                     key={cat}
                     onClick={() => setMarketCategory(cat)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                    className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
                       marketCategory === cat
                         ? 'bg-blue-600 text-white shadow-md'
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
@@ -2347,6 +2304,45 @@ export default function Home() {
                 ))}
               </div>
 
+              {/* Technical Chart Analysis Station */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                      <BarChart2 className="w-5 h-5 text-blue-600" />
+                      Terminal Gráfico de Análise Técnica
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Timeframes oficiais (1M, 5M, 15M, 1H, 1D), grade técnica e parâmetros de cotação em tempo real
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500 font-medium">Instrumento em Análise:</span>
+                    <select
+                      value={selectedAsset.id}
+                      onChange={(e) => setSelectedAssetId(e.target.value)}
+                      className="bg-slate-100 text-xs font-bold text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
+                    >
+                      {commodities.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.symbol} - {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <InteractiveChart
+                  commodity={selectedAsset}
+                  chartType={selectedChartType}
+                  timeframe={selectedTimeframe}
+                  onTimeframeChange={(tf) => setSelectedTimeframe(tf)}
+                  onChartTypeChange={(ct) => setSelectedChartType(ct)}
+                  height={320}
+                />
+              </div>
+
               {/* Commodities Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredCommodities.map((item) => {
@@ -2354,7 +2350,7 @@ export default function Home() {
                   return (
                     <div
                       key={item.id}
-                      className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:border-blue-300 transition flex flex-col justify-between space-y-4"
+                      className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:border-blue-300 transition flex flex-col justify-between space-y-4"
                     >
                       <div className="flex items-start justify-between">
                         <div>
@@ -2373,7 +2369,7 @@ export default function Home() {
 
                         <button
                           onClick={() => toggleFavorite(item.id)}
-                          className={`p-1.5 rounded-lg border transition ${
+                          className={`p-1.5 rounded-lg border transition cursor-pointer ${
                             isFav
                               ? 'bg-amber-50 border-amber-200 text-amber-500 font-bold'
                               : 'border-slate-100 text-slate-300 hover:text-slate-400'
@@ -2424,14 +2420,26 @@ export default function Home() {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex space-x-2 pt-2">
+                        <div className="flex items-center space-x-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedAssetId(item.id);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition cursor-pointer flex items-center justify-center gap-1 shrink-0"
+                            title="Carregar no Gráfico Técnico"
+                          >
+                            <BarChart2 className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="hidden xs:inline">Gráfico</span>
+                          </button>
                           <button
                             onClick={() => {
                               setSelectedAssetId(item.id);
                               setTradeSide('BUY');
                               setIsTradeModalOpen(true);
                             }}
-                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer"
+                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer"
                           >
                             Comprar
                           </button>
@@ -2441,7 +2449,7 @@ export default function Home() {
                               setTradeSide('SELL');
                               setIsTradeModalOpen(true);
                             }}
-                            className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer"
+                            className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer"
                           >
                             Vender
                           </button>
@@ -2454,12 +2462,10 @@ export default function Home() {
             </div>
           )}
 
-          {/* 3. CARTEIRA (PORTFOLIO, PROPORTIONAL CHART & WITHDRAWALS VIA M-PESA/E-MOLA) */}
+          {/* 3. CARTEIRA */}
           {activeTab === 'carteira' && (
             <div className="space-y-6">
-              
-              {/* Header com Dados da Corretora e Status da Janela Maputo */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -2476,7 +2482,6 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-                  {/* Status da Janela de Levantamento 08h - 12h */}
                   <div className={`px-3.5 py-2 rounded-2xl border text-xs flex items-center gap-2 ${
                     withdrawalWindow.isOpen
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
@@ -2493,7 +2498,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Botão de Ação Rápida: Depósito Emola */}
                   <button
                     onClick={() => {
                       setCarteiraSubTab('deposito');
@@ -2505,7 +2509,6 @@ export default function Home() {
                     <span>Fazer Depósito (e-Mola)</span>
                   </button>
 
-                  {/* Botão de Ação Rápida: Levantamento */}
                   <button
                     onClick={() => setIsWithdrawalModalOpen(true)}
                     className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-2xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
@@ -2518,9 +2521,7 @@ export default function Home() {
 
               {/* 5 KPI CARDS DA CARTEIRA */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                
-                {/* 1. Património Total */}
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
                     <span className="text-[11px] font-bold uppercase tracking-wider">Património Total</span>
                     <DollarSign className="w-4 h-4 text-blue-600" />
@@ -2529,8 +2530,7 @@ export default function Home() {
                   <p className="text-[11px] text-slate-500">Saldo + Margem em Posições</p>
                 </div>
 
-                {/* 2. Saldo Disponível */}
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
                     <span className="text-[11px] font-bold uppercase tracking-wider">Saldo em Conta</span>
                     <Award className="w-4 h-4 text-emerald-600" />
@@ -2539,8 +2539,7 @@ export default function Home() {
                   <p className="text-[11px] text-slate-500">Capital total creditado</p>
                 </div>
 
-                {/* 3. Saldo Retirável (Excedente à reserva de 1.000 MT) */}
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-1 relative overflow-hidden">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm space-y-1 relative overflow-hidden">
                   <div className="flex items-center justify-between text-slate-400">
                     <span className="text-[11px] font-bold uppercase tracking-wider">Saldo Retirável</span>
                     <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
@@ -2555,8 +2554,7 @@ export default function Home() {
                   </p>
                 </div>
 
-                {/* 4. Reserva Obrigatória (1.000 MT sempre mantida) */}
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
                     <span className="text-[11px] font-bold uppercase tracking-wider">Reserva Mínima</span>
                     <Shield className="w-4 h-4 text-amber-500" />
@@ -2565,8 +2563,7 @@ export default function Home() {
                   <p className="text-[11px] text-slate-500">Obrigatória em conta</p>
                 </div>
 
-                {/* 5. Rendimento Líquido (PnL Total) */}
-                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+                <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
                   <div className="flex items-center justify-between text-slate-400">
                     <span className="text-[11px] font-bold uppercase tracking-wider">Rendimento (PnL)</span>
                     <TrendingUp className="w-4 h-4 text-indigo-600" />
@@ -2578,7 +2575,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* GRÁFICO FUNCIONAL TOTALMENTE PROPORCIONAL AO SALDO */}
               <WalletBalanceChart
                 currentBalance={balance}
                 portfolioValue={portfolioValue}
@@ -2588,8 +2584,8 @@ export default function Home() {
                 transactions={userTransactions}
               />
 
-              {/* NAVEGAÇÃO DE SUB-ABAS DA CARTEIRA */}
-              <div className="bg-white rounded-3xl border border-slate-200 p-2 shadow-xs">
+              {/* Sub-abas de Navegação */}
+              <div className="bg-white rounded-3xl border border-slate-200 p-2 shadow-sm">
                 <div className="flex space-x-1 sm:space-x-2 overflow-x-auto pb-1 sm:pb-0">
                   <button
                     onClick={() => setCarteiraSubTab('deposito')}
@@ -2655,7 +2651,7 @@ export default function Home() {
                     }`}
                   >
                     <Smartphone className="w-4 h-4" />
-                    <span>Pedidos de Levantamento (M-Pesa / e-Mola)</span>
+                    <span>Pedidos de Levantamento</span>
                     {userWithdrawals.length > 0 && (
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
                         carteiraSubTab === 'levantamentos' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
@@ -2686,10 +2682,9 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* CONTEÚDO DA SUB-ABA: DEPÓSITO E-MOLA (NOVO) */}
+              {/* SUB-ABA: DEPÓSITO */}
               {carteiraSubTab === 'deposito' && (
-                <div className="space-y-6 animate-in fade-in duration-200">
-                  {/* Banner de Destaque */}
+                <div className="space-y-6">
                   <div className="bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 rounded-3xl p-6 sm:p-7 text-white shadow-lg relative overflow-hidden">
                     <div className="relative z-10 max-w-xl space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2712,8 +2707,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Alerta de Depósito Mínimo Obrigatório */}
-                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-900 shadow-xs">
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-900 shadow-sm">
                     <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 font-black">
                       <AlertCircle className="w-5 h-5 text-white" />
                     </div>
@@ -2727,10 +2721,8 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Cards dos Dados Oficiais: Número e Nome */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Card 1: Número e-Mola */}
-                    <div className="bg-white rounded-3xl border-2 border-amber-300/80 p-5 sm:p-6 shadow-xs space-y-3">
+                    <div className="bg-white rounded-3xl border-2 border-amber-300/80 p-5 sm:p-6 shadow-sm space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black uppercase tracking-wider text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
                           1. Número de Envio e-Mola
@@ -2750,7 +2742,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => handleCopyText('877083749', 'Número e-Mola')}
-                            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
                           >
                             {copiedField === 'Número e-Mola' ? (
                               <>
@@ -2771,8 +2763,7 @@ export default function Home() {
                       </p>
                     </div>
 
-                    {/* Card 2: Nome de Confirmação */}
-                    <div className="bg-white rounded-3xl border-2 border-emerald-300/80 p-5 sm:p-6 shadow-xs space-y-3">
+                    <div className="bg-white rounded-3xl border-2 border-emerald-300/80 p-5 sm:p-6 shadow-sm space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200 flex items-center gap-1">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -2790,7 +2781,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => handleCopyText('ELIZABETE NHATSUNGUE', 'Nome')}
-                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
                           >
                             {copiedField === 'Nome' ? (
                               <>
@@ -2812,8 +2803,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Passo a Passo em 4 Passos */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
                     <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
                       <Zap className="w-4 h-4 text-amber-500" />
                       Como Fazer o Depósito Passo a Passo:
@@ -2842,8 +2832,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* CARD EMBAIXO INFORMATIVO E AMIGÁVEL */}
-                  <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-100/60 border-2 border-blue-200 rounded-3xl p-6 sm:p-7 shadow-xs space-y-4">
+                  <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-100/60 border-2 border-blue-200 rounded-3xl p-6 sm:p-7 shadow-sm space-y-4">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
                       <div className="flex items-start gap-4 max-w-2xl">
                         <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
@@ -2860,10 +2849,7 @@ export default function Home() {
                             Após o depósito, envie a captura de tela no Privado do Admin!
                           </h4>
                           <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                            Olá investidor! Assim que concluir a sua transferência no <strong>e-Mola</strong>, tire uma <strong>captura de tela (print/screenshot)</strong> da mensagem SMS de confirmação que recebeu e envie diretamente no <strong>chat privado com o nosso Administrador</strong>.
-                          </p>
-                          <p className="text-xs text-slate-500 leading-relaxed">
-                            A nossa equipa valida o envio e adiciona imediatamente o saldo à sua carteira para que possa negociar as matérias-primas e participar da Janela das 21h com todo o conforto!
+                            Assim que concluir a sua transferência no <strong>e-Mola</strong>, tire uma <strong>captura de tela</strong> da mensagem SMS de confirmação recebida e envie diretamente no <strong>chat privado com o nosso Administrador</strong>.
                           </p>
                         </div>
                       </div>
@@ -2886,9 +2872,9 @@ export default function Home() {
                 </div>
               )}
 
-              {/* CONTEÚDO DA SUB-ABA 1: POSIÇÕES ATIVAS */}
+              {/* SUB-ABA: POSIÇÕES ATIVAS */}
               {carteiraSubTab === 'visao-geral' && (
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                     <div>
                       <h3 className="text-base font-black text-slate-900">Posições Abertas em Tempo Real</h3>
@@ -2909,7 +2895,7 @@ export default function Home() {
                       </p>
                       <button
                         onClick={() => setActiveTab('mercados')}
-                        className="px-4 py-2 bg-blue-50 text-blue-700 font-bold text-xs rounded-xl hover:bg-blue-100 transition"
+                        className="px-4 py-2 bg-blue-50 text-blue-700 font-bold text-xs rounded-xl hover:bg-blue-100 transition cursor-pointer"
                       >
                         Ir para Mercados
                       </button>
@@ -2960,7 +2946,7 @@ export default function Home() {
                                 <td className="py-3.5 text-right">
                                   <button
                                     onClick={() => closePosition(pos)}
-                                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm"
                                   >
                                     Liquidar
                                   </button>
@@ -2975,13 +2961,13 @@ export default function Home() {
                 </div>
               )}
 
-              {/* CONTEÚDO DA SUB-ABA 2: EXTRATO DE TRANSAÇÕES */}
+              {/* SUB-ABA: EXTRATO DE TRANSAÇÕES */}
               {carteiraSubTab === 'transacoes' && (
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                     <div>
                       <h3 className="text-base font-black text-slate-900">Extrato Central de Movimentações</h3>
-                      <p className="text-xs text-slate-500">Histórico completo de depósitos, bónus, lucros e débitos em Meticais (MT)</p>
+                      <p className="text-xs text-slate-500">Histórico completo de depósitos, bónus e débitos em Meticais (MT)</p>
                     </div>
                     <span className="text-xs font-mono bg-slate-100 text-slate-700 px-3 py-1 rounded-full font-bold">
                       {userTransactions.length} Registo(s)
@@ -2992,9 +2978,6 @@ export default function Home() {
                     <div className="text-center py-12 text-slate-400 text-xs space-y-2">
                       <History className="w-10 h-10 mx-auto text-slate-300" />
                       <p className="text-sm font-semibold text-slate-600">Nenhuma transação registada até ao momento</p>
-                      <p className="text-xs text-slate-400">
-                        Quando receber bónus da administração, coletar lucro na Janela 21h ou realizar levantamentos, os movimentos aparecerão aqui.
-                      </p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -3065,11 +3048,9 @@ export default function Home() {
                 </div>
               )}
 
-              {/* CONTEÚDO DA SUB-ABA 3: PEDIDOS DE LEVANTAMENTO (M-PESA / E-MOLA) */}
+              {/* SUB-ABA: PEDIDOS DE LEVANTAMENTO */}
               {carteiraSubTab === 'levantamentos' && (
                 <div className="space-y-6">
-                  
-                  {/* CTA Banner Novo Levantamento */}
                   <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                     <div className="space-y-2 max-w-xl">
                       <div className="flex items-center gap-2">
@@ -3084,7 +3065,7 @@ export default function Home() {
                         Levantamento Direto para o seu Telemóvel
                       </h3>
                       <p className="text-xs text-slate-300 leading-relaxed">
-                        Retire o seu saldo disponível entre <strong>300,00 MT</strong> e <strong>2.000,00 MT</strong> por pedido (intervalo mínimo de <strong>3 dias</strong> entre pedidos). Taxa operacional de <strong>5%</strong> sobre o valor levantado (debitada do saldo remanescente). Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
+                        Retire o seu saldo disponível entre <strong>300,00 MT</strong> e <strong>2.000,00 MT</strong> por pedido (intervalo mínimo de <strong>3 dias</strong> entre pedidos). Taxa operacional de <strong>5%</strong>. Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
                       </p>
                     </div>
 
@@ -3102,8 +3083,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Tabela de Pedidos de Levantamento */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                       <div>
                         <h3 className="text-base font-black text-slate-900">Histórico de Pedidos de Levantamento</h3>
@@ -3118,12 +3098,9 @@ export default function Home() {
                       <div className="text-center py-12 text-slate-400 text-xs space-y-3">
                         <Smartphone className="w-10 h-10 mx-auto text-slate-300" />
                         <p className="text-sm font-semibold text-slate-600">Nenhum pedido de levantamento registado</p>
-                        <p className="text-xs text-slate-400 max-w-md mx-auto">
-                          Quando solicitar um levantamento via M-Pesa ou e-Mola, o estado de envio e o protocolo aparecerão aqui com a estimativa de 2 a 3 horas.
-                        </p>
                         <button
                           onClick={() => setIsWithdrawalModalOpen(true)}
-                          className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow-xs hover:bg-blue-700 transition"
+                          className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm hover:bg-blue-700 transition cursor-pointer"
                         >
                           Solicitar Agora
                         </button>
@@ -3207,27 +3184,12 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-
-                  {/* Informação Regulamentar de Retiradas */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-600 space-y-2">
-                    <p className="font-bold text-slate-900 flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-blue-600" />
-                      Regulamento de Segurança para Levantamentos TapRise
-                    </p>
-                    <ul className="list-disc list-inside space-y-1 text-slate-600 text-[11px] leading-relaxed">
-                      <li><strong>Montante Mínimo:</strong> 1.000,00 MT por operação.</li>
-                      <li><strong>Reserva Obrigatória de Manutenção:</strong> A conta deve sempre manter um saldo remanescente mínimo de 1.000,00 MT para custódia de posições e integridade operacional.</li>
-                      <li><strong>Horário Oficial de Liquidação:</strong> Todos os dias entre as 08:00 e as 12:00 (Hora de Moçambique, África/Maputo, CAT UTC+2).</li>
-                      <li><strong>Prazo de Liquidação:</strong> Entre 2 a 3 horas a contar da submissão do pedido na plataforma.</li>
-                      <li><strong>Contas Suportadas:</strong> Carteiras móveis nacionais M-Pesa (Vodacom) e e-Mola (Movitel).</li>
-                    </ul>
-                  </div>
                 </div>
               )}
 
-              {/* CONTEÚDO DA SUB-ABA 4: OPERAÇÕES FECHADAS */}
+              {/* SUB-ABA: OPERAÇÕES FECHADAS */}
               {carteiraSubTab === 'fechadas' && (
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                     <div>
                       <h3 className="text-base font-black text-slate-900">Diário de Operações Liquidadas</h3>
@@ -3242,9 +3204,6 @@ export default function Home() {
                     <div className="text-center py-12 text-slate-400 text-xs space-y-2">
                       <CheckCircle className="w-10 h-10 mx-auto text-slate-300" />
                       <p className="text-sm font-semibold text-slate-600">Nenhuma operação fechada ainda</p>
-                      <p className="text-xs text-slate-400">
-                        Quando encerrar uma posição ativa de compra ou venda, o lucro ou perda consolidado aparecerá aqui.
-                      </p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -3290,28 +3249,25 @@ export default function Home() {
                   )}
                 </div>
               )}
-
             </div>
           )}
 
-
-
-          {/* 5. PERFIL (USER PROFILE & SETTINGS) */}
+          {/* 4. PERFIL */}
           {activeTab === 'perfil' && (
             <div className="space-y-6 max-w-2xl mx-auto">
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs text-center space-y-3">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center space-y-3">
                 <div className="w-20 h-20 rounded-full bg-blue-600 text-white font-black text-2xl flex items-center justify-center mx-auto shadow-lg shadow-blue-200">
-                  {userProfile?.nome ? userProfile.nome.charAt(0).toUpperCase() : 'U'}
+                  {profile?.nome ? profile.nome.charAt(0).toUpperCase() : 'U'}
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">
-                    {userProfile?.nome || 'Utilizador Moçambicano'}
+                    {profile?.nome || 'Utilizador Moçambicano'}
                   </h2>
                   <p className="text-xs text-slate-500">
-                    {userProfile?.email || user.email || 'utilizador@taprise.co.mz'}
+                    {profile?.email || user.email || 'utilizador@taprise.co.mz'}
                   </p>
                   <p className="text-xs font-semibold text-blue-600 mt-0.5">
-                    {userProfile?.provincia || 'Moçambique'}
+                    {profile?.provincia || 'Moçambique'}
                   </p>
                 </div>
                 <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-full">
@@ -3320,8 +3276,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Account Details Box */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2">
                   Dados do Investidor
                 </h3>
@@ -3329,19 +3284,19 @@ export default function Home() {
                 <div className="space-y-3 text-xs">
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Nome Completo:</span>
-                    <span className="font-bold text-slate-800">{userProfile?.nome || 'Investidor TapRise'}</span>
+                    <span className="font-bold text-slate-800">{profile?.nome || 'Investidor TapRise'}</span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">E-mail:</span>
-                    <span className="font-bold text-slate-800">{userProfile?.email || user.email}</span>
+                    <span className="font-bold text-slate-800">{profile?.email || user.email}</span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Idade Registada:</span>
-                    <span className="font-bold text-slate-800">{userProfile?.idade || 18} anos</span>
+                    <span className="font-bold text-slate-800">{profile?.idade || 18} anos</span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Província:</span>
-                    <span className="font-bold text-blue-700">{userProfile?.provincia || 'Maputo Cidade'}</span>
+                    <span className="font-bold text-blue-700">{profile?.provincia || 'Maputo Cidade'}</span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">N.º da Conta / ID de Negociação:</span>
@@ -3358,18 +3313,18 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* SEÇÃO: CONVIDE E GANHE 5% */}
+              {/* CONVIDE E GANHE */}
               <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-800 rounded-3xl p-6 text-white shadow-xl shadow-blue-500/10 space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black tracking-wider uppercase backdrop-blur-xs">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black tracking-wider uppercase backdrop-blur-sm">
                       <span>Bónus de Indicação</span>
                     </div>
                     <h3 className="text-lg font-black text-white mt-1.5">
                       Convide e Ganhe 5%
                     </h3>
                   </div>
-                  <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/20 flex items-center justify-center font-black text-sm text-amber-300">
+                  <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center font-black text-sm text-amber-300">
                     5%
                   </div>
                 </div>
@@ -3378,8 +3333,7 @@ export default function Home() {
                   Partilhe o seu link exclusivo. Quando um amigo se registar através dele e tiver saldo creditado pela Administração pela primeira vez, você recebe <strong>5% do valor creditado</strong> diretamente no seu saldo disponível!
                 </p>
 
-                {/* Condição Obrigatória: Apenas quem já depositou recebe */}
-                <div className="p-3 bg-amber-400/20 border border-amber-300/40 rounded-2xl text-[11px] text-amber-100 space-y-1 backdrop-blur-xs">
+                <div className="p-3 bg-amber-400/20 border border-amber-300/40 rounded-2xl text-[11px] text-amber-100 space-y-1 backdrop-blur-sm">
                   <div className="flex items-center gap-1.5 font-black text-amber-300 uppercase tracking-wider text-[10px]">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                     <span>Condição Obrigatória para Receber o Bónus</span>
@@ -3389,49 +3343,47 @@ export default function Home() {
                   </p>
                 </div>
 
-                {/* Link Box & Copy Button */}
                 <div className="space-y-2">
                   <label className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">
                     O Seu Link de Convite
                   </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={`https://taprise.pages.dev/register?ref=${displayInviteCode}`}
-                        className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleCopyText(`https://taprise.pages.dev/register?ref=${displayInviteCode}`, 'Link de Convite');
-                        }}
-                        className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
-                      >
-                        {copiedField === 'Link de Convite' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="text-emerald-700">Copiado!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copiar</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-blue-200 pt-1">
-                      <span>Código de Convite:</span>
-                      <span className="font-mono font-bold text-white bg-white/20 px-2 py-0.5 rounded-md">
-                        {displayInviteCode}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`https://taprise.pages.dev/register?ref=${displayInviteCode}`}
+                      className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleCopyText(`https://taprise.pages.dev/register?ref=${displayInviteCode}`, 'Link de Convite');
+                      }}
+                      className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      {copiedField === 'Link de Convite' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
                   </div>
+                  <div className="flex items-center justify-between text-[11px] text-blue-200 pt-1">
+                    <span>Código de Convite:</span>
+                    <span className="font-mono font-bold text-white bg-white/20 px-2 py-0.5 rounded-md">
+                      {displayInviteCode}
+                    </span>
+                  </div>
+                </div>
 
-                {/* Metrics de Convidados Ativos (Apenas com 1º depósito) & Comissões Ganhas */}
                 <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/15">
-                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
+                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-sm">
                     <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
                       <UserCheck className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
                       <span>Convidados com 1º Depósito</span>
@@ -3443,7 +3395,7 @@ export default function Home() {
                       Apenas quem já efetuou depósito
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-xs">
+                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-sm">
                     <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
                       <Coins className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                       <span>Comissões Recebidas</span>
@@ -3457,11 +3409,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Programa de Afiliados TapRise: +20 Convidados Ativos = Salário Semanal */}
-                <div className="p-4 bg-gradient-to-br from-amber-500/25 via-yellow-500/20 to-amber-600/30 border border-amber-400/50 rounded-2xl text-white space-y-2.5 backdrop-blur-xs shadow-lg">
+                <div className="p-4 bg-gradient-to-br from-amber-500/25 via-yellow-500/20 to-amber-600/30 border border-amber-400/50 rounded-2xl text-white space-y-2.5 backdrop-blur-sm shadow-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 rounded-xl shadow-xs">
+                      <div className="p-1.5 bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 rounded-xl shadow-sm">
                         <Award className="w-4 h-4 font-black" />
                       </div>
                       <div>
@@ -3470,7 +3421,7 @@ export default function Home() {
                       </div>
                     </div>
                     {activeDepositedInvitedCount >= 20 ? (
-                      <span className="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-black uppercase rounded-full tracking-wider animate-pulse shadow-xs">
+                      <span className="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-black uppercase rounded-full tracking-wider animate-pulse shadow-sm">
                         Afiliado Oficial Ativo
                       </span>
                     ) : (
@@ -3484,7 +3435,6 @@ export default function Home() {
                     O investidor que alcançar <strong>+20 convidados ativos com primeiro depósito</strong> torna-se automaticamente um <strong>Afiliado Oficial TapRise</strong>, com direito garantido a um <strong>Salário Semanal</strong> fixo pago pela Administração, além das comissões contínuas de 5% sobre cada indicação!
                   </p>
 
-                  {/* Barra de Progresso */}
                   <div className="space-y-1 pt-0.5">
                     <div className="flex justify-between text-[10px] font-bold">
                       <span className="text-amber-200">Progresso de Elegibilidade:</span>
@@ -3497,51 +3447,11 @@ export default function Home() {
                       />
                     </div>
                   </div>
-
-                  {activeDepositedInvitedCount >= 20 ? (
-                    <div className="p-2.5 bg-emerald-500/25 border border-emerald-400/60 rounded-xl text-[11px] text-emerald-200 font-bold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Parabéns! Você atingiu a meta de +20 convidados ativos e tem direito ao Salário Semanal da Administração.</span>
-                    </div>
-                  ) : (
-                    <div className="text-[10px] text-amber-200/90 flex items-center gap-1.5 pt-0.5">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                      <span>Faltam <strong>{Math.max(0, 20 - activeDepositedInvitedCount)} convidados com depósito</strong> para desbloquear o Salário Semanal de Afiliado.</span>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Account Management & Creation */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-                <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2">
-                  Gestão de Acesso e Contas
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Pretende criar uma nova conta ou alternar o investidor conectado?
-                </p>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Link
-                    href="/register"
-                    prefetch={true}
-                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center space-x-1.5 cursor-pointer"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Criar Nova Conta</span>
-                  </Link>
-                  <Link
-                    href="/login"
-                    prefetch={true}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center space-x-1.5 cursor-pointer"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span>Iniciar Outra Sessão</span>
-                  </Link>
-                </div>
-              </div>
-
-              {/* Institutional Infrastructure Card */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              {/* Infraestrutura e Acesso */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <div className="flex items-center space-x-2">
                     <Database className="w-4 h-4 text-blue-600" />
@@ -3586,7 +3496,7 @@ export default function Home() {
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (Reajustada sem comunidade - [Início, Mercados, Carteira, Perfil, Chat]) */}
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-white border-t border-slate-100 z-50 px-3 py-1.5 flex justify-around items-center shadow-lg">
         {[
           { id: 'inicio', label: 'Início', icon: BarChart2 },
@@ -3625,18 +3535,18 @@ export default function Home() {
 
       {/* ORDER EXECUTION MODAL */}
       {isTradeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-slate-100">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  {tradeSide === 'BUY' ? 'Comprar' : 'Vender a Descoberto'} {selectedAsset.name}
+                  {tradeSide === 'BUY' ? 'Comprar' : 'Vender'} {selectedAsset.name}
                 </h3>
                 <p className="text-xs text-slate-400">Moeda da Operação: Meticais Moçambicanos (MT)</p>
               </div>
               <button
                 onClick={() => setIsTradeModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3667,7 +3577,7 @@ export default function Home() {
                         key={num}
                         type="button"
                         onClick={() => setTradeQty(num)}
-                        className={`px-2.5 py-3 text-xs font-bold rounded-xl border transition ${
+                        className={`px-2.5 py-3 text-xs font-bold rounded-xl border transition cursor-pointer ${
                           tradeQty === num
                             ? 'bg-blue-600 text-white border-blue-600'
                             : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
@@ -3697,7 +3607,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Notice if market is closed / paused or balance is 0 */}
               {isTradingDisabled && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-bold flex items-center gap-2">
                   <Lock className="w-4 h-4 text-amber-600 shrink-0" />
@@ -3739,14 +3648,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL: DEPÓSITO VIA E-MOLA (MOVITEL MOÇAMBIQUE) */}
-      {/* ======================================================== */}
+      {/* MODAL: DEPÓSITO VIA E-MOLA */}
       {isDepositModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
-            
-            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center shadow-md shadow-orange-500/20">
@@ -3767,9 +3672,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Informações Oficiais para Transferência */}
             <div className="space-y-4">
-              {/* Número */}
               <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black uppercase tracking-wider text-amber-800">
@@ -3782,14 +3685,14 @@ export default function Home() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400 font-mono text-sm">+258</span>
-                    <span className="text-2xl font-black font-mono tracking-wider text-slate-900">
+                    <span className="text-2xl sm:text-3xl font-black font-mono tracking-wider text-slate-900">
                       877083749
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleCopyText('877083749', 'Número e-Mola')}
-                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     {copiedField === 'Número e-Mola' ? (
                       <>
@@ -3806,7 +3709,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Nome de Confirmação */}
               <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1">
@@ -3824,7 +3726,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => handleCopyText('ELIZABETE NHATSUNGUE', 'Nome')}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     {copiedField === 'Nome' ? (
                       <>
@@ -3841,7 +3743,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Aviso de Depósito Mínimo Obrigatório */}
               <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-amber-900">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <div>
@@ -3854,7 +3755,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Instruções Rápidas */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs text-slate-600 space-y-1.5">
                 <p className="font-bold text-slate-800">Instruções no telemóvel:</p>
                 <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-600">
@@ -3864,10 +3764,9 @@ export default function Home() {
                 </ol>
               </div>
 
-              {/* Card Embaixo: Mensagem Amigável */}
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-4 text-xs space-y-3">
                 <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm">
                     <MessageCircle className="w-4 h-4 text-white" />
                   </div>
                   <div className="space-y-1">
@@ -3875,10 +3774,7 @@ export default function Home() {
                       Envie o comprovativo no Privado do Admin!
                     </p>
                     <p className="text-[11px] text-slate-600 leading-relaxed">
-                      Após realizar a transferência no seu telemóvel, tire uma <strong>captura de tela (print)</strong> da mensagem SMS de confirmação recebida e envie no <strong>chat privado do Administrador</strong>.
-                    </p>
-                    <p className="text-[11px] text-blue-700 font-medium">
-                      O seu saldo será creditado com rapidez e segurança!
+                      Após realizar a transferência no seu telemóvel, tire uma <strong>captura de tela</strong> da mensagem SMS de confirmação recebida e envie no <strong>chat privado do Administrador</strong>.
                     </p>
                   </div>
                 </div>
@@ -3897,7 +3793,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Rodapé Fechar */}
             <div className="pt-1">
               <button
                 type="button"
@@ -3907,19 +3802,14 @@ export default function Home() {
                 Fechar
               </button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL 1: SOLICITAÇÃO DE LEVANTAMENTO (M-PESA / E-MOLA) */}
-      {/* ======================================================== */}
+      {/* MODAL: SOLICITAÇÃO DE LEVANTAMENTO */}
       {isWithdrawalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
-            
-            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md">
@@ -3940,7 +3830,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Aviso de Janela de Horário 08h às 12h Maputo */}
             <div className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 ${
               withdrawalWindow.isOpen
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
@@ -3957,10 +3846,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleExecuteWithdrawal} className="space-y-4">
-              
-              {/* Seleção de Operadora */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
                   1. Selecione a Operadora de Pagamento
@@ -3976,7 +3862,7 @@ export default function Home() {
                     }}
                     className={`p-3.5 rounded-2xl border-2 text-left transition flex items-center justify-between cursor-pointer ${
                       withdrawalMethod === 'mpesa'
-                        ? 'border-rose-500 bg-rose-50/50 shadow-xs ring-2 ring-rose-500/20'
+                        ? 'border-rose-500 bg-rose-50/50 shadow-sm ring-2 ring-rose-500/20'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
                   >
@@ -4002,7 +3888,7 @@ export default function Home() {
                     }}
                     className={`p-3.5 rounded-2xl border-2 text-left transition flex items-center justify-between cursor-pointer ${
                       withdrawalMethod === 'emola'
-                        ? 'border-amber-500 bg-amber-50/50 shadow-xs ring-2 ring-amber-500/20'
+                        ? 'border-amber-500 bg-amber-50/50 shadow-sm ring-2 ring-amber-500/20'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
                   >
@@ -4020,7 +3906,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Número de Telefone */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
                   2. Número de Telemóvel ({withdrawalMethod === 'mpesa' ? 'Prefixo 84 ou 85' : 'Prefixo 86 ou 87'})
@@ -4038,12 +3923,8 @@ export default function Home() {
                     className="w-full pl-16 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Insira exatamente os 9 dígitos da sua conta móvel nacional.
-                </p>
               </div>
 
-              {/* Nome de Confirmação */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
                   3. Nome Completo de Confirmação (Titular da Conta)
@@ -4060,7 +3941,6 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Valor a Levantar */}
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-xs font-bold text-slate-700">
@@ -4086,14 +3966,13 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Chips de Valor Rápido */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {[300, 500, 1000, 2000].map((preset) => (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => setWithdrawalAmount(preset.toString())}
-                      className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
                     >
                       {preset === 2000 ? '2.000 MT (Máx)' : `+${preset.toLocaleString('pt-MZ')} MT`}
                     </button>
@@ -4102,7 +3981,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setWithdrawalAmount(withdrawableBalance.toString())}
-                      className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-100 hover:bg-blue-200 text-blue-700 transition"
+                      className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-100 hover:bg-blue-200 text-blue-700 transition cursor-pointer"
                     >
                       Máximo Permitido ({formatMT(withdrawableBalance)})
                     </button>
@@ -4110,7 +3989,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Detalhes Financeiros e Cálculo de Reserva (Taxa de 5% sobre o valor levantado cortada do saldo restante) */}
               {(() => {
                 const amt = parseFloat(withdrawalAmount) || 0;
                 const feeAmt = Math.round(amt * 0.05 * 100) / 100;
@@ -4172,7 +4050,6 @@ export default function Home() {
                 );
               })()}
 
-              {/* Destaque de Intervalo de 3 Dias */}
               {isWithdrawalCooldownActive ? (
                 <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl text-[11px] text-amber-900 flex items-start gap-2">
                   <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -4195,7 +4072,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Botões de Ação */}
               <div className="flex space-x-3 pt-2">
                 <button
                   type="button"
@@ -4241,14 +4117,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL 2: CONFIRMAÇÃO DE SUCESSO DO PEDIDO DE LEVANTAMENTO */}
-      {/* ======================================================== */}
+      {/* MODAL: CONFIRMAÇÃO DE SUCESSO DO LEVANTAMENTO */}
       {withdrawalSuccessData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 text-center animate-in fade-in zoom-in-95 duration-200">
-            
-            {/* Ícone de Sucesso */}
             <div className="w-16 h-16 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
               <CheckCircle2 className="w-9 h-9" />
             </div>
@@ -4265,8 +4137,7 @@ export default function Home() {
               </p>
             </div>
 
-            {/* DESTAQUE PRINCIPAL: ESPERAR ENTRE 2 A 3 HORAS */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 text-left space-y-1.5 shadow-xs">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 text-left space-y-1.5 shadow-sm">
               <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wide">
                 <Clock className="w-4 h-4 text-amber-600" />
                 <span>Tempo de Espera: 2 a 3 Horas</span>
@@ -4276,7 +4147,6 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Recibo com Dados do Pedido */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-2 text-left">
               <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-slate-500">Montante a Receber:</span>
@@ -4304,7 +4174,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Botão Concluir */}
             <button
               onClick={() => {
                 setWithdrawalSuccessData(null);
