@@ -102,6 +102,43 @@ export function playMessageSound() {
   }
 }
 
+// Native System Notification Helper (WhatsApp style notification on mobile & desktop)
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return 'denied';
+  }
+  try {
+    const res = await Notification.requestPermission();
+    return res;
+  } catch (e) {
+    console.warn('Falha ao pedir permissão de notificações:', e);
+    return 'denied';
+  }
+}
+
+export function triggerPushNotification(title: string, body: string, onClickUrl?: string) {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    try {
+      const notif = new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+        tag: 'taprise-chat',
+        badge: '/favicon.ico'
+      });
+      notif.onclick = () => {
+        window.focus();
+        if (onClickUrl && typeof window !== 'undefined') {
+          window.location.href = onClickUrl;
+        }
+      };
+    } catch (e) {
+      console.warn('Falha ao disparar Notification:', e);
+    }
+  }
+}
+
+
 /**
  * Compresses an image in the browser ultra-fast using HTML5 Canvas & createObjectURL.
  * Resizes to max 800px and compresses to JPEG (quality 0.68, ~25-40KB)

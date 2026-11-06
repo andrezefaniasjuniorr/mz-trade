@@ -63,7 +63,8 @@ import {
   saveLocalPrivateChats,
   compressChatImage,
   uploadImageWithProgress,
-  playMessageSound
+  playMessageSound,
+  triggerPushNotification
 } from '@/lib/chatService';
 import WhatsAppLightbox from '@/components/WhatsAppLightbox';
 
@@ -842,6 +843,34 @@ export default function ChatPage() {
   const privateInputRef = useRef<HTMLTextAreaElement | null>(null);
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialMountRef = useRef<boolean>(true);
+  const lastSeenGroupMsgIdRef = useRef<string | null>(null);
+
+  // Hardware Mobile Back Button listener
+  useEffect(() => {
+    const handlePopState = () => {
+      if (lightboxData.isOpen) {
+        setLightboxData({ isOpen: false, url: null });
+        return;
+      }
+      if (pendingImage) {
+        setPendingImage(null);
+        return;
+      }
+      if (adminSelectedUserId) {
+        setAdminSelectedUserId(null);
+        return;
+      }
+      if (activeSegment === 'privado') {
+        setActiveSegment('grupo');
+        return;
+      }
+      // Voltar ao terminal principal
+      router.push('/');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [lightboxData.isOpen, pendingImage, adminSelectedUserId, activeSegment, router]);
 
   // Toast
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -850,8 +879,11 @@ export default function ChatPage() {
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Modal Lightbox opener
+  // Modal Lightbox opener com histórico para botão recuar
   const handleOpenLightbox = useCallback((url: string, caption?: string, author?: string, time?: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ modal: 'lightbox' }, '');
+    }
     setLightboxData({
       isOpen: true,
       url,
@@ -922,6 +954,25 @@ export default function ChatPage() {
         setCachedMessages(list);
         setIsLoadingMessages(false);
 
+        // Notificação sonora e push em tempo real para mensagens no chat de grupo
+        if (!initialMountRef.current && list.length > 0) {
+          const newest = list[list.length - 1];
+          if (newest.id !== lastSeenGroupMsgIdRef.current) {
+            lastSeenGroupMsgIdRef.current = newest.id;
+            if (newest.uid !== user?.uid) {
+              playMessageSound();
+              if (typeof document !== 'undefined' && document.hidden) {
+                triggerPushNotification(
+                  `TapRise • ${newest.displayName}`,
+                  newest.type === 'image' ? '📷 Foto' : newest.text
+                );
+              }
+            }
+          }
+        } else if (list.length > 0) {
+          lastSeenGroupMsgIdRef.current = list[list.length - 1].id;
+        }
+
         const container = chatContainerRef.current;
         if (container) {
           const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
@@ -941,7 +992,7 @@ export default function ChatPage() {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [user?.uid]);
 
   // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat)
   useEffect(() => {
@@ -1733,13 +1784,20 @@ export default function ChatPage() {
         
         {/* Esquerda: [<-] [TR Logo] + Título */}
         <div className="flex items-center space-x-2.5 sm:space-x-3">
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) {
+                router.back();
+              } else {
+                router.push('/');
+              }
+            }}
             className="p-1.5 -ml-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
             title="Voltar ao Terminal TapRise"
           >
             <ArrowLeft className="w-5 h-5" />
-          </Link>
+          </button>
 
           <div className="w-9 h-9 rounded-[10px] bg-[#2563eb] text-white font-black text-sm flex items-center justify-center shadow-xs">
             TR

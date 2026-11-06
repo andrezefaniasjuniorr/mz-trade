@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   Clock,
   CheckCircle,
@@ -77,11 +77,26 @@ interface Janela21hTerminalProps {
   onOrderExecuted?: (newBalance: number) => void;
 }
 
+// Armazenamento inicial determinístico por timeframe
+const INITIAL_TERMINAL_CANDLES: Record<Timeframe, CandleData[]> = {
+  M1: createSeedCandles('M1'),
+  M5: createSeedCandles('M5'),
+  M15: createSeedCandles('M15'),
+  H1: createSeedCandles('H1')
+};
+
+const emptySubscribe = () => () => {};
+
 export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Janela21hTerminalProps) {
   const { user, userProfile, updateBalance } = useAuth();
 
-  // Controle de Montagem para evitar erro de hidratação
-  const [isMounted, setIsMounted] = useState<boolean>(false);
+  // Controle de Montagem puro sem setState em efeito
+  const isMounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+
   const [maputoTime, setMaputoTime] = useState<MaputoTimeDetails>(() => getMaputoTimeDetails());
   const [chartType, setChartType] = useState<'candle' | 'line'>('candle');
   const [timeframe, setTimeframe] = useState<Timeframe>('M5');
@@ -93,13 +108,13 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
 
   // Armazenamento estável por timeframe para não trocar nem resetar sozinho
   const storeRef = useRef<Record<Timeframe, CandleData[]>>({
-    M1: createSeedCandles('M1'),
-    M5: createSeedCandles('M5'),
-    M15: createSeedCandles('M15'),
-    H1: createSeedCandles('H1')
+    M1: [...INITIAL_TERMINAL_CANDLES.M1],
+    M5: [...INITIAL_TERMINAL_CANDLES.M5],
+    M15: [...INITIAL_TERMINAL_CANDLES.M15],
+    H1: [...INITIAL_TERMINAL_CANDLES.H1]
   });
 
-  const [candles, setCandles] = useState<CandleData[]>(() => storeRef.current['M5']);
+  const [candles, setCandles] = useState<CandleData[]>(() => INITIAL_TERMINAL_CANDLES.M5);
 
   // Estados de Execução da Ordem
   const [isProcessingOrder, setIsProcessingOrder] = useState<boolean>(false);
@@ -124,7 +139,6 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   });
 
   useEffect(() => {
-    setIsMounted(true);
     const timer = setInterval(() => {
       setMaputoTime(getMaputoTimeDetails());
     }, 1000);

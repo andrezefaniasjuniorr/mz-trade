@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -48,7 +48,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, initAnalytics } from '@/src/firebase';
-import { prefetchLatestChatMessages } from '@/lib/chatService';
+import {
+  prefetchLatestChatMessages,
+  playMessageSound,
+  triggerPushNotification,
+  requestNotificationPermission
+} from '@/lib/chatService';
 import {
   getMaputoTodayDate,
   getMaputoTimeDetails,
@@ -69,6 +74,7 @@ import {
   addDoc,
   query,
   limit,
+  orderBy,
   serverTimestamp,
   onSnapshot
 } from 'firebase/firestore';
@@ -444,7 +450,7 @@ function getOrCreateCandles(commodity: Commodity, timeframe: string): ChartCandl
       last.high = Math.max(last.high, commodity.price);
       last.low = Math.min(last.low, commodity.price);
     }
-    return list;
+    return [...list];
   }
 
   const seed = getAssetSeed(commodity.id);
@@ -495,7 +501,7 @@ function getOrCreateCandles(commodity: Commodity, timeframe: string): ChartCandl
   }
 
   persistentCandleStore[key] = list;
-  return list;
+  return [...list];
 }
 
 // ==========================================
@@ -543,7 +549,7 @@ const InteractiveChart = ({
 
   const candles = useMemo(() => {
     return getOrCreateCandles(commodity, activeTimeframe);
-  }, [commodity, activeTimeframe]);
+  }, [commodity, commodity.price, commodity.id, activeTimeframe]);
 
   const handleSetTimeframe = (tf: '1M' | '5M' | '15M' | '1H' | '1D') => {
     setInternalTimeframe(tf);
@@ -944,6 +950,27 @@ const InteractiveChart = ({
   );
 };
 
+// Stable Clock Store for pure render ticks
+let cachedClockNow = typeof window !== 'undefined' ? Date.now() : 0;
+const clockListeners = new Set<() => void>();
+
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    cachedClockNow = Date.now();
+    clockListeners.forEach((cb) => cb());
+  }, 10000);
+}
+
+const subscribeToClock = (callback: () => void) => {
+  clockListeners.add(callback);
+  return () => {
+    clockListeners.delete(callback);
+  };
+};
+
+const getClockSnapshot = () => cachedClockNow;
+const getClockServerSnapshot = () => 0;
+
 // ==========================================
 // MAIN COMPONENT (PAGE)
 // ==========================================
@@ -953,8 +980,44 @@ export default function Home() {
   const { user, userProfile, loading: authLoading, logout, updateBalance, isAdmin } = useAuth();
   const profile = (userProfile || {}) as any;
 
-  const [activeTab, setActiveTab] = useState<'inicio' | 'mercados' | 'carteira' | 'perfil'>('inicio');
+  // Pure clock timestamp for cooldown calculations
+  const nowMs = useSyncExternalStore(subscribeToClock, getClockSnapshot, getClockServerSnapshot);
+
+  // Fullscreen MT5 modal asset state for Mercados
+  const [fullscreenAssetId, setFullscreenAssetId] = useState<string | null>(null);
   const [commodities, setCommodities] = useState<Commodity[]>(INITIAL_COMMODITIES);
+  const fullscreenAsset = useMemo(
+    () => commodities.find((c) => c.id === fullscreenAssetId) || null,
+    [commodities, fullscreenAssetId]
+  );
+
+  const openFullscreenAsset = useCallback((asset: Commodity | null) => {
+    if (asset) {
+      setFullscreenAssetId(asset.id);
+      if (typeof window !== 'undefined') {
+        window.history.pushState({ modal: 'fullscreen_chart', assetId: asset.id }, '');
+      }
+    } else {
+      setFullscreenAssetId(null);
+    }
+  }, []);
+  const setFullscreenAsset = openFullscreenAsset;
+
+  const [activeTab, setActiveTabRaw] = useState<'inicio' | 'mercados' | 'carteira' | 'perfil'>('inicio');
+  const setActiveTab = useCallback((tab: 'inicio' | 'mercados' | 'carteira' | 'perfil') => {
+    setActiveTabRaw((prev) => {
+      if (prev !== tab && typeof window !== 'undefined') {
+        window.history.pushState({ tab }, '', `#${tab}`);
+      }
+      return tab;
+    });
+  }, []);
+
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
+    return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
+  });
+  const latestChatMsgIdRef = useRef<string | null>(null);
+
   const [localBalance, setLocalBalance] = useState<number | null>(null);
   const balance = localBalance !== null ? localBalance : (profile?.balance ?? profile?.saldoVirtual ?? 0.00);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -999,10 +1062,52 @@ export default function Home() {
 
   const [selectedAssetId, setSelectedAssetId] = useState<string>(INITIAL_COMMODITIES[0].id);
   const [isTradeModalOpen, setIsTradeModalOpen] = useState<boolean>(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
+  const [isQuickSearchOpen, setIsQuickSearchOpen] = useState<boolean>(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
   const [tradeSide, setTradeSide] = useState<'BUY' | 'SELL'>('BUY');
   const [tradeQty, setTradeQty] = useState<number>(1);
 
   const counterRef = useRef(100);
+
+
+
+  // Background Chat Messages Listener with Audio Chime & Push Notification
+  useEffect(() => {
+    let isInitialMount = true;
+    const messagesRef = collection(db, 'taprise_group_messages');
+    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(1));
+
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        if (snapshot.empty) return;
+        const latestDoc = snapshot.docs[0];
+        const d = latestDoc.data();
+        const msgId = latestDoc.id;
+
+        if (isInitialMount) {
+          isInitialMount = false;
+          latestChatMsgIdRef.current = msgId;
+          return;
+        }
+
+        if (msgId !== latestChatMsgIdRef.current) {
+          latestChatMsgIdRef.current = msgId;
+          if (d.uid !== user?.uid) {
+            playMessageSound();
+            const senderName = d.displayName || 'Investidor TapRise';
+            const bodyText = d.type === 'image' ? '📷 Enviou uma foto' : (d.text || 'Nova mensagem no chat');
+            triggerPushNotification(`TapRise Chat • ${senderName}`, bodyText, '/chat');
+            showToast(`💬 ${senderName}: ${bodyText}`, 'info');
+          }
+        }
+      },
+      (err) => console.warn('Erro ao escutar mensagens do chat em segundo plano:', err)
+    );
+
+    return () => unsub();
+  }, [user?.uid]);
 
   const selectedAsset = useMemo(() => {
     return commodities.find((c) => c.id === selectedAssetId) || commodities[0];
@@ -1069,6 +1174,57 @@ export default function Home() {
     phone: string;
     name: string;
   } | null>(null);
+
+  // Hardware and Mobile Back Button listener
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (fullscreenAssetId) {
+        setFullscreenAssetId(null);
+        return;
+      }
+      if (isTradeModalOpen) {
+        setIsTradeModalOpen(false);
+        return;
+      }
+      if (isNotificationsOpen) {
+        setIsNotificationsOpen(false);
+        return;
+      }
+      if (isQuickSearchOpen) {
+        setIsQuickSearchOpen(false);
+        return;
+      }
+      if (isDepositModalOpen) {
+        setIsDepositModalOpen(false);
+        return;
+      }
+      if (isWithdrawalModalOpen) {
+        setIsWithdrawalModalOpen(false);
+        return;
+      }
+
+      if (e.state && e.state.tab) {
+        setActiveTabRaw(e.state.tab);
+      } else {
+        const hash = window.location.hash.replace('#', '');
+        if (['inicio', 'mercados', 'carteira', 'perfil'].includes(hash)) {
+          setActiveTabRaw(hash as any);
+        } else {
+          setActiveTabRaw('inicio');
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [
+    fullscreenAssetId,
+    isTradeModalOpen,
+    isNotificationsOpen,
+    isQuickSearchOpen,
+    isDepositModalOpen,
+    isWithdrawalModalOpen
+  ]);
 
   const handleCopyText = (text: string, label: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -1295,6 +1451,18 @@ export default function Home() {
           const baseOpen = item.open || (item.price * 0.98);
           const calcChange24h = Number((((newPrice - baseOpen) / baseOpen) * 100).toFixed(2));
 
+          // Atualizar vela atual no repositório persistente de gráficos
+          const timeframes = ['1M', '5M', '15M', '1H', '1D'];
+          timeframes.forEach((tf) => {
+            const k = `${item.id}_${tf}`;
+            if (persistentCandleStore[k] && persistentCandleStore[k].length > 0) {
+              const lastCandle = persistentCandleStore[k][persistentCandleStore[k].length - 1];
+              lastCandle.close = newPrice;
+              lastCandle.high = Math.max(lastCandle.high, newPrice);
+              lastCandle.low = Math.min(lastCandle.low, newPrice);
+            }
+          });
+
           return {
             ...item,
             price: newPrice,
@@ -1304,7 +1472,7 @@ export default function Home() {
           };
         })
       );
-    }, 2200);
+    }, 1250);
 
     return () => clearInterval(interval);
   }, []);
@@ -1338,7 +1506,6 @@ export default function Home() {
     ? (lastWithdrawal.requestedAt?.toMillis ? lastWithdrawal.requestedAt.toMillis() : (lastWithdrawal.requestedAt?.seconds ? lastWithdrawal.requestedAt.seconds * 1000 : (lastWithdrawal.requestedAt ? new Date(lastWithdrawal.requestedAt).getTime() : 0)))
     : 0;
 
-  const nowMs = Date.now();
   const timeSinceLastWithdrawal = nowMs > 0 && lastWithdrawalTime > 0 ? nowMs - lastWithdrawalTime : 0;
   const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && nowMs > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
   const remainingCooldownMs = isWithdrawalCooldownActive ? THREE_DAYS_MS - timeSinceLastWithdrawal : 0;
@@ -1678,13 +1845,13 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col pb-20 md:pb-6">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col pt-13 sm:pt-14 pb-28 md:pb-8 overflow-x-hidden">
       
       {/* Toast Notification Popup */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 animate-bounce">
+        <div className="fixed top-16 right-3 sm:right-5 z-50 animate-bounce">
           <div
-            className={`flex items-center space-x-2.5 px-4 py-3 rounded-xl shadow-xl border text-sm font-semibold transition ${
+            className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl shadow-xl border text-xs font-semibold transition ${
               toastMessage.type === 'error'
                 ? 'bg-rose-50 text-rose-800 border-rose-200'
                 : toastMessage.type === 'info'
@@ -1692,92 +1859,305 @@ export default function Home() {
                 : 'bg-emerald-50 text-emerald-800 border-emerald-200'
             }`}
           >
-            {toastMessage.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />}
-            {toastMessage.type === 'info' && <Zap className="w-5 h-5 text-blue-500 shrink-0" />}
-            {toastMessage.type === 'success' && <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />}
+            {toastMessage.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />}
+            {toastMessage.type === 'info' && <Zap className="w-4 h-4 text-blue-500 shrink-0" />}
+            {toastMessage.type === 'success' && <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />}
             <span>{toastMessage.text}</span>
           </div>
         </div>
       )}
 
-      {/* 1. TOPO DA PLATAFORMA */}
-      <header className="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-sm h-14">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
+      {/* 1. BARRA SUPERIOR FIXA (FIXED TOP MT5) */}
+      <header className="fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs h-13 sm:h-14 flex items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 w-full flex items-center justify-between">
           <div
-            className="flex items-center space-x-2.5 cursor-pointer select-none"
+            className="flex items-center space-x-2 cursor-pointer select-none"
             onClick={() => setActiveTab('inicio')}
             title="Ir para o Início"
           >
-            <div className="w-9 h-9 bg-[#2563eb] rounded-[10px] text-white font-black text-sm flex items-center justify-center shadow-sm shrink-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-[#2563eb] rounded-lg text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
               TR
             </div>
             <div className="flex flex-col justify-center">
               <div className="flex items-center gap-1.5">
-                <span className="text-base font-bold text-slate-900 tracking-tight leading-none">
+                <span className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-none">
                   TapRise
                 </span>
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 leading-none">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 leading-none">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
                   AO VIVO
                 </span>
               </div>
-              <span className="text-[10px] text-slate-400 font-medium leading-tight mt-0.5">
+              <span className="text-[9px] text-slate-400 font-medium leading-tight mt-0.5">
                 BMM • Moçambique
               </span>
             </div>
           </div>
 
-          <div className="flex items-center space-x-1.5">
-            {isAdmin && (
-              <Link
-                href="/admin"
-                prefetch={true}
-                className="w-9 h-9 rounded-full flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer shadow-sm shrink-0"
-                title="Painel Administrativo Central (/admin)"
-              >
-                <Shield className="w-4 h-4 text-amber-600" />
-              </Link>
-            )}
-
-            <Link
-              href="/chat"
-              prefetch={true}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 transition relative cursor-pointer shrink-0"
-              title="Grupo de Chat Ao Vivo"
-            >
-              <MessageCircle className="w-4 h-4 text-slate-700" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
-            </Link>
-
+          <div className="flex items-center space-x-1 sm:space-x-1.5">
+            {/* 1. ÍCONE DE PESQUISA */}
             <button
-              onClick={() => setActiveTab('mercados')}
-              className={`w-9 h-9 rounded-full flex items-center justify-center transition cursor-pointer shrink-0 ${
-                activeTab === 'mercados'
-                  ? 'bg-blue-50 text-[#2563eb]'
-                  : 'text-slate-700 hover:bg-slate-100'
+              type="button"
+              onClick={() => setIsQuickSearchOpen(!isQuickSearchOpen)}
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center transition cursor-pointer shrink-0 ${
+                isQuickSearchOpen
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
-              title="Mercados & Cotações em Tempo Real"
+              title="Pesquisar Ativos e Mercados"
             >
-              <TrendingUp className="w-4 h-4" />
+              <Search className="w-3.5 h-3.5" />
             </button>
 
+            {/* 2. ÍCONE DE NOTIFICAÇÕES COM BADGE */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center transition cursor-pointer shrink-0 relative ${
+                  isNotificationsOpen
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Notificações e Alertas Oficiais"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
+              </button>
+
+              {/* DROPDOWN NOTIFICAÇÕES (POSICIONADO COM PRECISÃO) */}
+              {isNotificationsOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
+                    onClick={() => setIsNotificationsOpen(false)}
+                  />
+                  <div className="fixed top-14 right-2 sm:right-4 left-2 sm:left-auto sm:w-84 max-w-sm mx-auto z-50 bg-white rounded-2xl border border-slate-200 shadow-2xl p-3.5 text-slate-800 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                      <div className="flex items-center gap-1.5">
+                        <Bell className="w-3.5 h-3.5 text-blue-600" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-900">Notificações TapRise</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsNotificationsOpen(false)}
+                        className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Banner Permissão de Notificação Sonora & Push */}
+                    {notificationPermission !== 'granted' && (
+                      <div className="my-2 p-2.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
+                        <p className="text-[11px] font-bold text-blue-900">Alertas de Mensagens no Celular</p>
+                        <p className="text-[10px] text-slate-600 mt-0.5">Receba avisos instantâneos de mensagens no chat, estilo WhatsApp.</p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const res = await requestNotificationPermission();
+                            setNotificationPermission(res);
+                            if (res === 'granted') {
+                              playMessageSound();
+                              triggerPushNotification('TapRise Notificações', 'Notificações ativadas no seu celular com sucesso!');
+                              showToast('Notificações no celular ativadas com sucesso!', 'success');
+                            }
+                          }}
+                          className="mt-2 w-full py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                        >
+                          <Bell className="w-3 h-3" />
+                          <span>Ativar Notificações no Celular</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {notificationPermission === 'granted' && (
+                      <div className="my-2 py-1 px-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] text-emerald-800 font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1"><Check className="w-3 h-3 text-emerald-600" /> Alertas no celular ativados</span>
+                        <span className="text-emerald-600 text-[9px] uppercase font-mono">Ao Vivo</span>
+                      </div>
+                    )}
+
+                    <div className="mt-2 space-y-2 max-h-72 overflow-y-auto pr-0.5">
+                      {/* Janela Operacional BMM */}
+                      <div className="p-2 rounded-xl bg-blue-50/70 border border-blue-100 text-xs">
+                        <div className="flex items-center justify-between font-bold text-blue-900 mb-0.5">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <Clock className="w-3 h-3 text-blue-600" />
+                            Janela BMM 21:00
+                          </span>
+                          <span className="text-[9px] text-blue-600 bg-white px-1.5 py-0.5 rounded border border-blue-200">Seg — Sex</span>
+                        </div>
+                        <p className="text-[10px] text-slate-600">
+                          Sessão diária no card BMM/MZN com liquidação pontual às 21:00 CAT.
+                        </p>
+                      </div>
+
+                      {/* Janela Levantamento */}
+                      <div className="p-2 rounded-xl bg-emerald-50/70 border border-emerald-100 text-xs">
+                        <div className="flex items-center justify-between font-bold text-emerald-900 mb-0.5">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <Smartphone className="w-3 h-3 text-emerald-600" />
+                            Janela de Levantamento (08h — 12h)
+                          </span>
+                          <span className="text-[9px] text-emerald-700 bg-white px-1.5 py-0.5 rounded border border-emerald-200">M-Pesa / e-Mola</span>
+                        </div>
+                        <p className="text-[10px] text-slate-600">
+                          Mín. 300 MT, máx. 2.000 MT por pedido (intervalo obrigatório de 3 dias).
+                        </p>
+                      </div>
+
+                      {/* Depósito Mínimo */}
+                      <div className="p-2 rounded-xl bg-amber-50/70 border border-amber-100 text-xs">
+                        <div className="flex items-center justify-between font-bold text-amber-900 mb-0.5">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <Coins className="w-3 h-3 text-amber-600" />
+                            Depósito Mínimo: 1.000 MT
+                          </span>
+                          <span className="text-[9px] text-amber-700 bg-white px-1.5 py-0.5 rounded border border-amber-200">e-Mola</span>
+                        </div>
+                        <p className="text-[10px] text-slate-600">
+                          Depósitos via e-Mola creditados na carteira institucional.
+                        </p>
+                      </div>
+
+                      {/* Programa Afiliados */}
+                      <div className="p-2 rounded-xl bg-purple-50/70 border border-purple-100 text-xs">
+                        <div className="flex items-center justify-between font-bold text-purple-900 mb-0.5">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <Award className="w-3 h-3 text-purple-600" />
+                            Afiliados (+20 Ativos)
+                          </span>
+                          <span className="text-[9px] text-purple-700 bg-white px-1.5 py-0.5 rounded border border-purple-200">Salário Semanal</span>
+                        </div>
+                        <p className="text-[10px] text-slate-600">
+                          +20 convidados com primeiro depósito garantem salário semanal fixo da Administração.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 3. ÍCONE DO PERFIL */}
             <button
+              type="button"
               onClick={() => setActiveTab('perfil')}
-              className="w-9 h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-sm hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0"
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0 ${
+                activeTab === 'perfil'
+                  ? 'bg-blue-700 text-white ring-2 ring-blue-400'
+                  : 'bg-[#2563eb] text-white'
+              }`}
               title="Perfil do Investidor"
             >
               {profile?.nome ? profile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')}
             </button>
 
+            {/* 4. CHAT LINK */}
+            <Link
+              href="/chat"
+              prefetch={true}
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 transition relative cursor-pointer shrink-0"
+              title="Grupo de Chat Ao Vivo"
+            >
+              <MessageCircle className="w-3.5 h-3.5 text-slate-700" />
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+            </Link>
+
+            {isAdmin && (
+              <Link
+                href="/admin"
+                prefetch={true}
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer shadow-xs shrink-0"
+                title="Painel Administrativo Central (/admin)"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-600" />
+              </Link>
+            )}
+
             <button
               onClick={handleLogout}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer shrink-0"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer shrink-0"
               title="Terminar Sessão"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+
+        {/* QUICK SEARCH OVERLAY EM POPDOWN NA BARRA FIXA */}
+        {isQuickSearchOpen && (
+          <div className="border-t border-slate-100 bg-white px-4 py-3 shadow-lg animate-in slide-in-from-top-2 duration-150">
+            <div className="max-w-2xl mx-auto flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Pesquisar por ativo, símbolo ou categoria..."
+                  value={headerSearchQuery}
+                  onChange={(e) => setHeaderSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-slate-100 border-0 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (headerSearchQuery.trim()) {
+                    setMarketSearch(headerSearchQuery.trim());
+                    setActiveTab('mercados');
+                  }
+                  setIsQuickSearchOpen(false);
+                }}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition cursor-pointer shrink-0"
+              >
+                Ver em Mercados
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsQuickSearchOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {headerSearchQuery.trim() && (
+              <div className="max-w-2xl mx-auto mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pt-1">
+                {commodities
+                  .filter((c) =>
+                    c.name.toLowerCase().includes(headerSearchQuery.toLowerCase()) ||
+                    c.symbol.toLowerCase().includes(headerSearchQuery.toLowerCase())
+                  )
+                  .slice(0, 4)
+                  .map((item) => (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setFullscreenAsset(item);
+                        setIsQuickSearchOpen(false);
+                      }}
+                      className="p-2 rounded-xl border border-slate-100 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 transition cursor-pointer flex items-center justify-between"
+                    >
+                      <div>
+                        <span className="text-[10px] font-black font-mono text-blue-600 bg-blue-50 px-1 py-0.5 rounded">
+                          {item.symbol}
+                        </span>
+                        <p className="text-xs font-bold text-slate-900 truncate max-w-[140px]">{item.name}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-black font-mono text-slate-900">{formatMT(item.price)}</p>
+                        <span className="text-[10px] text-blue-600 font-bold flex items-center gap-0.5 justify-end">
+                          <BarChart2 className="w-3 h-3" /> Gráfico MT5
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* GLOBAL ANNOUNCEMENT BANNER */}
@@ -2021,158 +2401,102 @@ export default function Home() {
                 }}
               />
 
-              {/* Chart & Quick Watchlist */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">Terminal Gráfico de Mercado</h2>
-                      <p className="text-xs text-slate-500">Análise técnica com parâmetros oficiais de cotação e grade profissional</p>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <select
-                        value={selectedAsset.id}
-                        onChange={(e) => setSelectedAssetId(e.target.value)}
-                        className="bg-slate-100 text-xs font-bold text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
-                      >
-                        {commodities.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.symbol} - {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <InteractiveChart
-                    commodity={selectedAsset}
-                    chartType={selectedChartType}
-                    timeframe={selectedTimeframe}
-                    onTimeframeChange={(tf) => setSelectedTimeframe(tf)}
-                    onChartTypeChange={(ct) => setSelectedChartType(ct)}
-                    height={300}
-                  />
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                    <div>
-                      <span className="text-2xl font-black text-slate-900">{formatMT(selectedAsset.price)}</span>
-                      <span
-                        className={`ml-2 text-sm font-bold inline-flex items-center ${
-                          selectedAsset.change24h >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                        }`}
-                      >
-                        {selectedAsset.change24h >= 0 ? (
-                          <ArrowUpRight className="w-4 h-4 mr-0.5" />
-                        ) : (
-                          <ArrowDownRight className="w-4 h-4 mr-0.5" />
-                        )}
-                        {selectedAsset.change24h >= 0 ? '+' : ''}
-                        {selectedAsset.change24h.toFixed(2)}%
-                      </span>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {selectedAsset.description || `${selectedAsset.category} • Por ${selectedAsset.unit}`}
-                      </p>
-                    </div>
-
-                    {isTradingDisabled ? (
-                      <div className="flex items-center space-x-2 px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-bold">
-                        <Lock className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>{tradingDisabledReason}</span>
-                      </div>
-                    ) : (
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => {
-                            setTradeSide('BUY');
-                            setIsTradeModalOpen(true);
-                          }}
-                          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <TrendingUp className="w-4 h-4" />
-                          <span>Comprar</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setTradeSide('SELL');
-                            setIsTradeModalOpen(true);
-                          }}
-                          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <TrendingDown className="w-4 h-4" />
-                          <span>Vender</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
+              {/* DESTAQUES DO MERCADO & DICA DO INSTRUTOR (Clean MT5 Layout) */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Watchlist de Favoritos */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-bold text-slate-900">Favoritos de Moçambique</h3>
-                      <button
-                        onClick={() => setActiveTab('mercados')}
-                        className="text-xs text-blue-600 font-semibold hover:underline cursor-pointer"
-                      >
-                        Ver todos
-                      </button>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                        <TrendingUp className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">Cotações Rápidas (Favoritos)</h3>
+                        <p className="text-[11px] text-slate-400">Preços em direto de matérias-primas nacionais</p>
+                      </div>
                     </div>
-
-                    <div className="space-y-2.5">
-                      {commodities
-                        .filter((c) => favorites.includes(c.id))
-                        .map((asset) => (
-                          <div
-                            key={asset.id}
-                            onClick={() => setSelectedAssetId(asset.id)}
-                            className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition ${
-                              selectedAsset.id === asset.id
-                                ? 'border-blue-500 bg-blue-50/60 shadow-sm'
-                                : 'border-slate-100 hover:bg-slate-50'
-                            }`}
-                          >
-                            <div>
-                              <p className="text-xs font-bold text-slate-800">{asset.symbol}</p>
-                              <p className="text-[11px] text-slate-500 truncate max-w-[130px]">{asset.name}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-xs font-bold">{formatMT(asset.price)}</p>
-                              <p
-                                className={`text-[10px] font-bold ${
-                                  asset.change24h >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                                }`}
-                              >
-                                {asset.change24h >= 0 ? '+' : ''}
-                                {asset.change24h.toFixed(2)}%
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
+                    <button
+                      onClick={() => setActiveTab('mercados')}
+                      className="text-xs text-blue-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Ver todos
+                    </button>
                   </div>
 
-                  {customInstructorTip.active && (
-                    <div className="bg-blue-50/90 rounded-2xl p-4 border border-blue-100 space-y-2.5 shadow-sm">
-                      <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
-                        <div className="flex items-center space-x-1.5">
-                          <BookOpen className="w-4 h-4 text-[#2563eb]" />
-                          <span>{customInstructorTip.title || 'Dica do Instrutor'}</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {commodities
+                      .filter((c) => favorites.includes(c.id))
+                      .slice(0, 4)
+                      .map((asset) => (
+                        <div
+                          key={asset.id}
+                          className="p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-blue-200 transition flex flex-col justify-between gap-2"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <span className="text-[10px] font-black font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                {asset.symbol}
+                              </span>
+                              <p className="text-xs font-bold text-slate-900 mt-1 truncate max-w-[120px]">{asset.name}</p>
+                            </div>
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                asset.change24h >= 0
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}
+                            >
+                              {asset.change24h >= 0 ? '+' : ''}{asset.change24h.toFixed(2)}%
+                            </span>
+                          </div>
+
+                          <div className="flex items-baseline justify-between pt-1 border-t border-slate-100">
+                            <p className="text-sm font-black font-mono text-slate-900">{formatMT(asset.price)}</p>
+                            <button
+                              type="button"
+                              onClick={() => setFullscreenAsset(asset)}
+                              className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5 cursor-pointer"
+                              title="Abrir Gráfico MT5"
+                            >
+                              <BarChart2 className="w-3 h-3" />
+                              <span>Gráfico</span>
+                            </button>
+                          </div>
                         </div>
-                        <span className="text-[10px] bg-blue-100 text-[#2563eb] px-2 py-0.5 rounded-full font-bold border border-blue-200">
-                          {customInstructorTip.badge || 'Dica de Ouro'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                        &ldquo;{customInstructorTip.content}&rdquo;
-                      </p>
-                      <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1 border-t border-blue-100/60">
-                        <span className="font-semibold text-slate-600">{customInstructorTip.author || 'Instrutor Mateus Maputo'}</span>
-                        <span className="text-[10px] text-blue-600 font-bold">Oficial TapRise</span>
-                      </div>
-                    </div>
-                  )}
+                      ))}
+                  </div>
                 </div>
+
+                {/* Dica do Instrutor Oficial */}
+                {customInstructorTip.active && (
+                  <div className="bg-gradient-to-br from-blue-50/90 via-indigo-50/60 to-white rounded-2xl p-5 border border-blue-100 shadow-sm flex flex-col justify-between space-y-3">
+                    <div className="flex items-center justify-between text-blue-900 font-bold text-xs border-b border-blue-100/80 pb-3">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                          <BookOpen className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">{customInstructorTip.title || 'Dica do Instrutor'}</h4>
+                          <span className="text-[10px] text-blue-600 font-medium">Educação e Gestão de Risco</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-blue-100 text-[#2563eb] px-2.5 py-1 rounded-full font-bold border border-blue-200">
+                        {customInstructorTip.badge || 'Dica de Ouro'}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium bg-white/70 p-3.5 rounded-xl border border-blue-100/50">
+                      &ldquo;{customInstructorTip.content}&rdquo;
+                    </p>
+
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1">
+                      <span className="font-semibold text-slate-700">{customInstructorTip.author || 'Instrutor Mateus Maputo'}</span>
+                      <span className="text-[10px] text-blue-600 font-bold bg-white px-2 py-0.5 rounded-md border border-blue-100 shadow-xs">
+                        Oficial TapRise
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Active Positions Summary */}
@@ -2304,46 +2628,7 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* Technical Chart Analysis Station */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div>
-                    <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-                      <BarChart2 className="w-5 h-5 text-blue-600" />
-                      Terminal Gráfico de Análise Técnica
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Timeframes oficiais (1M, 5M, 15M, 1H, 1D), grade técnica e parâmetros de cotação em tempo real
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-slate-500 font-medium">Instrumento em Análise:</span>
-                    <select
-                      value={selectedAsset.id}
-                      onChange={(e) => setSelectedAssetId(e.target.value)}
-                      className="bg-slate-100 text-xs font-bold text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
-                    >
-                      {commodities.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.symbol} - {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <InteractiveChart
-                  commodity={selectedAsset}
-                  chartType={selectedChartType}
-                  timeframe={selectedTimeframe}
-                  onTimeframeChange={(tf) => setSelectedTimeframe(tf)}
-                  onChartTypeChange={(ct) => setSelectedChartType(ct)}
-                  height={320}
-                />
-              </div>
-
-              {/* Commodities Grid */}
+              {/* Commodities Grid (Lista Limpa Estilo MT5 sem gráfico em background) */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredCommodities.map((item) => {
                   const isFav = favorites.includes(item.id);
@@ -2355,7 +2640,7 @@ export default function Home() {
                       <div className="flex items-start justify-between">
                         <div>
                           <div className="flex items-center space-x-2">
-                            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">
+                            <span className="text-xs font-black font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
                               {item.symbol}
                             </span>
                             <span className="text-[10px] text-slate-400 uppercase font-semibold">{item.category}</span>
@@ -2382,7 +2667,7 @@ export default function Home() {
 
                       <div>
                         <div className="flex items-baseline justify-between">
-                          <p className="text-xl font-black text-slate-900">{formatMT(item.price)}</p>
+                          <p className="text-xl font-black font-mono text-slate-900">{formatMT(item.price)}</p>
                           <p
                             className={`text-xs font-bold flex items-center ${
                               item.change24h >= 0 ? 'text-emerald-600' : 'text-rose-600'
@@ -2400,7 +2685,7 @@ export default function Home() {
                           </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-500">
+                        <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-500 font-mono">
                           <div>
                             <span>Máx 24h: </span>
                             <strong className="text-slate-700">{formatMT(item.high)}</strong>
@@ -2414,7 +2699,7 @@ export default function Home() {
 
                       {isGlobalMarketClosed || marketHoursConfig.pausedAssets[item.id] ? (
                         <div className="pt-2">
-                          <div className="w-full py-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px] font-bold flex items-center justify-center gap-1.5">
+                          <div className="w-full py-2.5 px-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px] font-bold flex items-center justify-center gap-1.5">
                             <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                             <span>{marketHoursConfig.pausedAssets[item.id] ? 'Ativo Pausado' : 'Mercado Fechado'}</span>
                           </div>
@@ -2423,15 +2708,12 @@ export default function Home() {
                         <div className="flex items-center space-x-2 pt-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setSelectedAssetId(item.id);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition cursor-pointer flex items-center justify-center gap-1 shrink-0"
-                            title="Carregar no Gráfico Técnico"
+                            onClick={() => setFullscreenAsset(item)}
+                            className="px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                            title="Abrir Gráfico MT5 em Tela Cheia"
                           >
                             <BarChart2 className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="hidden xs:inline">Gráfico</span>
+                            <span>Gráfico</span>
                           </button>
                           <button
                             onClick={() => {
@@ -2439,7 +2721,7 @@ export default function Home() {
                               setTradeSide('BUY');
                               setIsTradeModalOpen(true);
                             }}
-                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer"
+                            className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer text-center"
                           >
                             Comprar
                           </button>
@@ -2449,7 +2731,7 @@ export default function Home() {
                               setTradeSide('SELL');
                               setIsTradeModalOpen(true);
                             }}
-                            className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer"
+                            className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer text-center"
                           >
                             Vender
                           </button>
@@ -3313,139 +3595,96 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* CONVIDE E GANHE */}
-              <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-800 rounded-3xl p-6 text-white shadow-xl shadow-blue-500/10 space-y-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black tracking-wider uppercase backdrop-blur-sm">
-                      <span>Bónus de Indicação</span>
-                    </div>
-                    <h3 className="text-lg font-black text-white mt-1.5">
-                      Convide e Ganhe 5%
-                    </h3>
-                  </div>
-                  <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center font-black text-sm text-amber-300">
-                    5%
-                  </div>
-                </div>
-
-                <p className="text-xs text-blue-100 leading-relaxed">
-                  Partilhe o seu link exclusivo. Quando um amigo se registar através dele e tiver saldo creditado pela Administração pela primeira vez, você recebe <strong>5% do valor creditado</strong> diretamente no seu saldo disponível!
-                </p>
-
-                <div className="p-3 bg-amber-400/20 border border-amber-300/40 rounded-2xl text-[11px] text-amber-100 space-y-1 backdrop-blur-sm">
-                  <div className="flex items-center gap-1.5 font-black text-amber-300 uppercase tracking-wider text-[10px]">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                    <span>Condição Obrigatória para Receber o Bónus</span>
-                  </div>
-                  <p className="leading-relaxed">
-                    <strong>Apenas investidores que já tiverem efetuado o seu 1º depósito</strong> (mínimo de 1.000 MT) têm direito a receber os 5% de bónus de convite. Usuários que ainda não tenham realizado depósito não receberão comissões por indicação.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">
-                    O Seu Link de Convite
-                  </label>
+              {/* CONVITE & AFILIADOS (Compacto & Profissional MT5) */}
+              <div className="bg-gradient-to-br from-[#1d4ed8] via-[#1e40af] to-[#1e3a8a] text-white p-4 rounded-2xl shadow-sm border border-blue-500/30 space-y-3">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-white/15 text-amber-300 flex items-center justify-center font-black text-xs">
+                      5%
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white leading-tight">Programa de Convites & Bónus</h3>
+                      <p className="text-[10px] text-blue-200">5% creditado após 1º depósito do convidado (mín. 1.000 MT)</p>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-300/30">
+                    Bónus 5%
+                  </span>
+                </div>
+
+                {/* KPI Estatísticas em 2 Colunas Compactas */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-xs">
+                    <div className="flex items-center gap-1 text-[9px] uppercase font-bold text-blue-200">
+                      <UserCheck className="w-3 h-3 text-emerald-300" />
+                      <span>Convidados Ativos</span>
+                    </div>
+                    <p className="text-lg font-black text-white mt-0.5 leading-none">{activeDepositedInvitedCount}</p>
+                    <span className="text-[9px] text-blue-200/70">Com 1º depósito</span>
+                  </div>
+                  <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-xs">
+                    <div className="flex items-center gap-1 text-[9px] uppercase font-bold text-blue-200">
+                      <Coins className="w-3 h-3 text-amber-300" />
+                      <span>Comissões Recebidas</span>
+                    </div>
+                    <p className="text-lg font-black text-amber-300 mt-0.5 leading-none">{formatMT(totalCommissionsEarned)}</p>
+                    <span className="text-[9px] text-blue-200/70">Saldo disponível</span>
+                  </div>
+                </div>
+
+                {/* Campo Compacto de Link de Convite com Cópia Direta */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-blue-200 px-0.5">
+                    <span>Link Exclusivo de Indicação:</span>
+                    <span>Código: <strong className="text-white font-mono">{displayInviteCode}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-black/30 p-1 rounded-xl border border-white/15">
                     <input
                       type="text"
                       readOnly
                       value={`https://taprise.pages.dev/register?ref=${displayInviteCode}`}
-                      className="flex-1 bg-white/10 border border-white/20 text-white font-mono text-xs px-3.5 py-2.5 rounded-xl select-all focus:outline-none"
+                      className="flex-1 bg-transparent text-white font-mono text-[11px] px-2 py-1 select-all focus:outline-none truncate"
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        handleCopyText(`https://taprise.pages.dev/register?ref=${displayInviteCode}`, 'Link de Convite');
-                      }}
-                      className="px-4 py-2.5 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100 font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                      onClick={() => handleCopyText(`https://taprise.pages.dev/register?ref=${displayInviteCode}`, 'Link de Convite')}
+                      className="px-3 py-1.5 bg-white text-blue-700 hover:bg-blue-50 font-bold text-xs rounded-lg transition flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
                     >
                       {copiedField === 'Link de Convite' ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700">Copiado!</span>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700 text-[10px]">Copiado</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copiar</span>
+                          <Copy className="w-3 h-3" />
+                          <span className="text-[10px]">Copiar</span>
                         </>
                       )}
                     </button>
                   </div>
-                  <div className="flex items-center justify-between text-[11px] text-blue-200 pt-1">
-                    <span>Código de Convite:</span>
-                    <span className="font-mono font-bold text-white bg-white/20 px-2 py-0.5 rounded-md">
-                      {displayInviteCode}
-                    </span>
-                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/15">
-                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-sm">
-                    <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
-                      <UserCheck className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                      <span>Convidados com 1º Depósito</span>
-                    </div>
-                    <p className="text-2xl font-black text-white mt-1">
-                      {activeDepositedInvitedCount}
-                    </p>
-                    <p className="text-[10px] text-blue-200/80 mt-0.5 leading-tight">
-                      Apenas quem já efetuou depósito
-                    </p>
-                  </div>
-                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-sm">
-                    <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-blue-200">
-                      <Coins className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                      <span>Comissões Recebidas</span>
-                    </div>
-                    <p className="text-2xl font-black text-amber-300 mt-1">
-                      {formatMT(totalCommissionsEarned)}
-                    </p>
-                    <p className="text-[10px] text-blue-200/80 mt-0.5 leading-tight">
-                      5% creditado no saldo disponível
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-gradient-to-br from-amber-500/25 via-yellow-500/20 to-amber-600/30 border border-amber-400/50 rounded-2xl text-white space-y-2.5 backdrop-blur-sm shadow-lg">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 rounded-xl shadow-sm">
-                        <Award className="w-4 h-4 font-black" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-wider text-amber-300">Programa de Afiliados Oficiais</p>
-                        <p className="text-[11px] text-slate-200 font-medium">+20 Convidados Ativos = Salário Semanal</p>
-                      </div>
+                {/* Barra de Afiliados Oficiais (+20 Ativos = Salário Semanal) */}
+                <div className="p-2.5 bg-black/25 rounded-xl border border-white/10 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <div className="flex items-center gap-1 text-amber-200">
+                      <Award className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                      <span className="font-bold">Afiliado Oficial (+20 ativos = Salário Semanal)</span>
                     </div>
                     {activeDepositedInvitedCount >= 20 ? (
-                      <span className="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-black uppercase rounded-full tracking-wider animate-pulse shadow-sm">
-                        Afiliado Oficial Ativo
+                      <span className="px-1.5 py-0.5 bg-emerald-500 text-white text-[9px] font-black uppercase rounded-full">
+                        Ativo
                       </span>
                     ) : (
-                      <span className="px-2.5 py-0.5 bg-white/20 text-amber-200 text-[10px] font-mono font-bold rounded-lg border border-white/10">
-                        {activeDepositedInvitedCount}/20
-                      </span>
+                      <span className="font-mono font-bold text-amber-300">{Math.min(20, activeDepositedInvitedCount)}/20</span>
                     )}
                   </div>
-
-                  <p className="text-[11px] text-slate-100 leading-relaxed">
-                    O investidor que alcançar <strong>+20 convidados ativos com primeiro depósito</strong> torna-se automaticamente um <strong>Afiliado Oficial TapRise</strong>, com direito garantido a um <strong>Salário Semanal</strong> fixo pago pela Administração, além das comissões contínuas de 5% sobre cada indicação!
-                  </p>
-
-                  <div className="space-y-1 pt-0.5">
-                    <div className="flex justify-between text-[10px] font-bold">
-                      <span className="text-amber-200">Progresso de Elegibilidade:</span>
-                      <span className="text-white font-mono">{Math.min(20, activeDepositedInvitedCount)} de 20 convidados ativos</span>
-                    </div>
-                    <div className="w-full bg-black/40 h-2.5 rounded-full overflow-hidden p-0.5 border border-white/10">
-                      <div
-                        className="h-full bg-gradient-to-r from-amber-400 to-yellow-300 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, (activeDepositedInvitedCount / 20) * 100)}%` }}
-                      />
-                    </div>
+                  <div className="w-full bg-white/15 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-400 to-yellow-300 transition-all duration-300"
+                      style={{ width: `${Math.min(100, (activeDepositedInvitedCount / 20) * 100)}%` }}
+                    />
                   </div>
                 </div>
               </div>
@@ -3496,8 +3735,8 @@ export default function Home() {
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-white border-t border-slate-100 z-50 px-3 py-1.5 flex justify-around items-center shadow-lg">
+      {/* MOBILE BOTTOM NAVIGATION BAR (FIXED BOTTOM MT5) */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-white/95 backdrop-blur-md border-t border-slate-200/90 z-40 px-2 py-1.5 flex justify-around items-center shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
         {[
           { id: 'inicio', label: 'Início', icon: BarChart2 },
           { id: 'mercados', label: 'Mercados', icon: TrendingUp },
@@ -3510,28 +3749,126 @@ export default function Home() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as 'inicio' | 'mercados' | 'carteira' | 'perfil')}
-              className={`flex flex-col items-center py-1 px-3 rounded-xl transition cursor-pointer ${
+              className={`flex-1 flex flex-col items-center py-1 px-1 rounded-xl transition cursor-pointer ${
                 isActive ? 'text-[#2563eb] font-bold' : 'text-slate-400 hover:text-slate-600'
               }`}
             >
-              <Icon className="w-5 h-5" />
-              <span className="text-[9px] mt-0.5 leading-none font-medium">{tab.label}</span>
+              <div className={`p-1 rounded-lg transition ${isActive ? 'bg-blue-50 text-[#2563eb]' : ''}`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <span className={`text-[10px] mt-0.5 leading-none ${isActive ? 'font-bold text-[#2563eb]' : 'font-medium'}`}>{tab.label}</span>
             </button>
           );
         })}
         <Link
           href="/chat"
           prefetch={true}
-          className="flex flex-col items-center py-1 px-3 rounded-xl transition text-[#2563eb] font-bold relative cursor-pointer"
+          className="flex-1 flex flex-col items-center py-1 px-1 rounded-xl transition text-slate-500 hover:text-blue-600 font-medium relative cursor-pointer"
           title="Grupo Chat Ao Vivo"
         >
-          <div className="relative">
-            <MessageCircle className="w-5 h-5 text-[#2563eb]" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+          <div className="relative p-1 rounded-lg">
+            <MessageCircle className="w-5 h-5 text-slate-600" />
+            <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
           </div>
-          <span className="text-[9px] mt-0.5 leading-none text-[#2563eb] font-bold">Chat</span>
+          <span className="text-[10px] mt-0.5 leading-none font-medium">Chat</span>
         </Link>
       </nav>
+
+      {/* MT5 FULLSCREEN TRADING TERMINAL MODAL */}
+      {fullscreenAsset && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-150">
+          <div className="max-w-5xl w-full mx-auto bg-[#0b0f19] border border-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden my-auto">
+            {/* Header Barra Superior MT5 */}
+            <div className="flex flex-wrap items-center justify-between p-3.5 sm:p-5 border-b border-slate-800/90 gap-3 bg-slate-950/60">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFullscreenAsset(null)}
+                  className="p-2 text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 rounded-xl border border-slate-800 transition cursor-pointer shrink-0"
+                  title="Fechar Terminal (Voltar à Lista)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black font-mono px-2 py-0.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded-md">
+                      {fullscreenAsset.symbol}
+                    </span>
+                    <h3 className="text-base sm:text-lg font-black text-white">{fullscreenAsset.name}</h3>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                      Terminal Cotações Ao Vivo
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs font-mono">
+                    <span className="text-white font-black text-sm">{formatMT(fullscreenAsset.price)}</span>
+                    <span className={`font-bold ${fullscreenAsset.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {fullscreenAsset.change24h >= 0 ? '+' : ''}{fullscreenAsset.change24h.toFixed(2)}%
+                    </span>
+                    <span className="text-slate-400 hidden sm:inline">• {fullscreenAsset.category}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botões Comprar / Vender no Topo do Terminal */}
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAssetId(fullscreenAsset.id);
+                    setTradeSide('BUY');
+                    setIsTradeModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>Comprar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAssetId(fullscreenAsset.id);
+                    setTradeSide('SELL');
+                    setIsTradeModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <TrendingDown className="w-3.5 h-3.5" />
+                  <span>Vender</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Gráfico Interativo com Grade Técnica, Timeframes e Barra OHLC */}
+            <div className="p-2 sm:p-4">
+              <InteractiveChart
+                commodity={fullscreenAsset}
+                chartType={selectedChartType}
+                timeframe={selectedTimeframe}
+                onTimeframeChange={(tf) => setSelectedTimeframe(tf)}
+                onChartTypeChange={(ct) => setSelectedChartType(ct)}
+                height={380}
+              />
+            </div>
+
+            {/* Rodapé Informativo MT5 */}
+            <div className="px-4 sm:px-5 py-3 bg-slate-950/90 border-t border-slate-800/80 flex flex-wrap justify-between items-center text-xs text-slate-400 gap-3">
+              <div className="flex items-center gap-4 text-[11px] font-mono">
+                <span>Máx 24h: <strong className="text-slate-200">{formatMT(fullscreenAsset.high)}</strong></span>
+                <span>Mín 24h: <strong className="text-slate-200">{formatMT(fullscreenAsset.low)}</strong></span>
+                <span>Unidade: <strong className="text-slate-200">{fullscreenAsset.unit}</strong></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFullscreenAsset(null)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Fechar Terminal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ORDER EXECUTION MODAL */}
       {isTradeModalOpen && (
