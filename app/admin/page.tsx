@@ -48,6 +48,7 @@ import {
   Megaphone
 } from 'lucide-react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
+import TapRiseModal from '@/components/TapRiseModal';
 import { getMaputoTodayDate, getMaputoTimeDetails, evaluate21hOrder, MaputoTimeDetails } from '@/lib/maputoTime';
 import { db } from '@/src/firebase';
 import {
@@ -197,6 +198,10 @@ export default function AdminPage() {
 
   // Active Tab: 1 - Visão Geral, 2 - Usuários, 3 - Levantamentos, 4 - Jogo 21h, 5 - Mercado, 6 - Comunicados, 7 - Dica do Instrutor, 8 - Chat Global
   const [activeTab, setActiveTab] = useState<'visao-geral' | 'usuarios' | 'levantamentos' | 'jogo-21h' | 'mercado' | 'comunicados' | 'dica-instrutor' | 'chat'>('visao-geral');
+
+  // Chat message delete modal state
+  const [chatMsgToDelete, setChatMsgToDelete] = useState<string | null>(null);
+  const [isDeletingChatMsg, setIsDeletingChatMsg] = useState(false);
 
   // Dica do Instrutor State (doc: config/dicaInstrutor)
   const [instructorTipText, setInstructorTipText] = useState<string>('Nunca invista mais de 10% do seu saldo disponível numa única operação. Diversifique entre setores (Energia, Metais e Agricultura) para proteger o seu capital virtual!');
@@ -1572,10 +1577,15 @@ export default function AdminPage() {
   };
 
   // AÇÃO ABA: Apagar mensagem do chat (Soft delete)
-  const handleDeleteChatMessage = async (msgId: string) => {
-    if (!confirm('Deseja realmente remover esta mensagem (soft delete) para todos os utilizadores?')) return;
+  const handleDeleteChatMessage = (msgId: string) => {
+    setChatMsgToDelete(msgId);
+  };
+
+  const confirmDeleteChatMessage = async () => {
+    if (!chatMsgToDelete) return;
+    setIsDeletingChatMsg(true);
     try {
-      await updateDoc(doc(db, 'taprise_group_messages', msgId), {
+      await updateDoc(doc(db, 'taprise_group_messages', chatMsgToDelete), {
         isDeleted: true,
         text: 'Esta mensagem foi removida pela administração.'
       });
@@ -1583,6 +1593,9 @@ export default function AdminPage() {
     } catch (e: any) {
       console.error('Erro ao apagar mensagem:', e);
       showToast('Erro ao remover mensagem.', 'error');
+    } finally {
+      setIsDeletingChatMsg(false);
+      setChatMsgToDelete(null);
     }
   };
 
@@ -4588,6 +4601,21 @@ export default function AdminPage() {
         )}
 
       </main>
+
+      {/* Modal profissional TapRise para exclusão de mensagem no chat */}
+      <TapRiseModal
+        isOpen={Boolean(chatMsgToDelete)}
+        title="Remover Mensagem do Chat"
+        description="Deseja realmente remover esta mensagem (soft delete) para todos os utilizadores?"
+        confirmText="Remover Mensagem"
+        cancelText="Cancelar"
+        isLoading={isDeletingChatMsg}
+        variant="danger"
+        onConfirm={confirmDeleteChatMessage}
+        onCancel={() => {
+          if (!isDeletingChatMsg) setChatMsgToDelete(null);
+        }}
+      />
     </div>
   );
 }

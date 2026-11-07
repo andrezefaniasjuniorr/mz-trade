@@ -23,6 +23,7 @@ import {
   collection,
   serverTimestamp
 } from 'firebase/firestore';
+import TapRiseModal from '@/components/TapRiseModal';
 
 interface CandleData {
   time: string;
@@ -34,7 +35,7 @@ interface CandleData {
 
 type Timeframe = 'M1' | 'M5' | 'M15' | 'H1';
 
-// Gerador determinístico (evita erro de hidratação SSR)
+// Gerador determinístico backward sem salto final (evita erro de hidratação SSR)
 function createSeedCandles(tf: Timeframe, basePrice = 1482.50): CandleData[] {
   const counts: Record<Timeframe, { count: number; intervalMins: number; vol: number }> = {
     M1: { count: 32, intervalMins: 1, vol: 0.8 },
@@ -45,22 +46,24 @@ function createSeedCandles(tf: Timeframe, basePrice = 1482.50): CandleData[] {
 
   const cfg = counts[tf];
   const list: CandleData[] = [];
-  let current = basePrice - 1.0;
+  let currentClose = basePrice;
+  const now = new Date();
 
-  for (let i = cfg.count; i >= 1; i--) {
-    const wave = Math.sin(i * 0.45) * 0.5 + Math.cos(i * 0.3) * 0.5;
+  // Constrói para trás a partir de basePrice: a última vela termina exatamente no preço atual sem salto
+  for (let i = 0; i < cfg.count; i++) {
+    const wave = Math.sin((i + 1) * 0.45) * 0.5 + Math.cos((i + 1) * 0.3) * 0.5;
     const delta = wave * cfg.vol;
-    const open = Number(current.toFixed(2));
-    const close = Number(Math.max(10, open + delta).toFixed(2));
-    const high = Number((Math.max(open, close) + cfg.vol * 0.4).toFixed(2));
-    const low = Number((Math.min(open, close) - cfg.vol * 0.4).toFixed(2));
+    const open = Number((currentClose - delta).toFixed(2));
+    const close = Number(currentClose.toFixed(2));
+    const high = Number((Math.max(open, close) + cfg.vol * 0.35).toFixed(2));
+    const low = Number((Math.min(open, close) - cfg.vol * 0.35).toFixed(2));
 
-    const totalMinutes = i * cfg.intervalMins;
-    const h = String(Math.floor((1260 - totalMinutes) / 60) % 24).padStart(2, '0');
-    const m = String(Math.abs(totalMinutes % 60)).padStart(2, '0');
+    const candleTime = new Date(now.getTime() - i * cfg.intervalMins * 60 * 1000);
+    const h = String(candleTime.getHours()).padStart(2, '0');
+    const m = String(candleTime.getMinutes()).padStart(2, '0');
 
-    list.push({ time: `${h}:${m}`, open, high, low, close });
-    current = close;
+    list.unshift({ time: `${h}:${m}`, open, high, low, close });
+    currentClose = open;
   }
 
   return list;
@@ -138,6 +141,71 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
     ticket: ''
   });
 
+  // Modal profissional TapRise para avisos
+  const [modalNotice, setModalNotice] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    variant: 'primary' | 'warning' | 'danger' | 'info';
+  } | null>(null);
+
+  // Controle offline/online
+  const [isOffline, setIsOffline] = useState<boolean>(false);
+  const isOfflineRef = useRef<boolean>(false);
+  const offlineTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      setIsOffline(true);
+      isOfflineRef.current = true;
+      offlineTimeRef.current = Date.now();
+    };
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      isOfflineRef.current = false;
+      if (offlineTimeRef.current) {
+        const elapsedSec = Math.max(1, Math.round((Date.now() - offlineTimeRef.current) / 1000));
+        offlineTimeRef.current = null;
+
+        // Ao voltar online, avança o mercado com saldo proporcional ao tempo offline
+        const steps = Math.min(30, Math.max(3, Math.floor(elapsedSec / 2)));
+        let deltaSum = 0;
+        for (let i = 0; i < steps; i++) {
+          deltaSum += (Math.random() - 0.49) * 0.5;
+        }
+
+        setCurrentPrice((prev) => {
+          const nextPrice = Number((prev + deltaSum).toFixed(2));
+          setLastTickDir(nextPrice >= prev ? 'up' : 'down');
+
+          const currentList = storeRef.current[timeframe];
+          const now = new Date();
+          const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          currentList.push({
+            time: timeStr,
+            open: prev,
+            high: Math.max(prev, nextPrice) + 0.35,
+            low: Math.min(prev, nextPrice) - 0.35,
+            close: nextPrice
+          });
+          if (currentList.length > 35) currentList.shift();
+          setCandles([...currentList]);
+
+          return nextPrice;
+        });
+      }
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [timeframe]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setMaputoTime(getMaputoTimeDetails());
@@ -157,6 +225,9 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
     const intervalMs = timeframe === 'M1' ? 750 : timeframe === 'M5' ? 1200 : 1800;
 
     const tickInterval = setInterval(() => {
+      // Quando offline, o gráfico fica totalmente parado visualmente
+      if (isOfflineRef.current) return;
+
       setCurrentPrice((prev) => {
         const step = (Math.random() - 0.49) * (timeframe === 'M1' ? 0.35 : 0.6);
         const nextPrice = Number((prev + step).toFixed(2));
@@ -201,19 +272,34 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   // Execução de Ordem na Bolsa
   const handleExecuteOrder = async (action: 'buy' | 'sell') => {
     if (!user) {
-      alert('Por favor, inicie sessão para confirmar a ordem.');
+      setModalNotice({
+        isOpen: true,
+        title: 'Autenticação Necessária',
+        description: 'Por favor, inicie sessão para confirmar a ordem.',
+        variant: 'warning'
+      });
       return;
     }
 
     if (isProcessingOrder) return;
 
     if (userClaimedToday) {
-      alert('Você já concluiu a operação de hoje. Aguarde a próxima janela.');
+      setModalNotice({
+        isOpen: true,
+        title: 'Operação Já Realizada',
+        description: 'Você já concluiu a operação de hoje. Aguarde a próxima janela.',
+        variant: 'info'
+      });
       return;
     }
 
     if (!isWindowActive) {
-      alert('Mercado Fechado. A janela oficial abre às 21:00.');
+      setModalNotice({
+        isOpen: true,
+        title: 'Mercado Fechado',
+        description: 'A janela oficial de negociação abre às 21:00.',
+        variant: 'warning'
+      });
       return;
     }
 
@@ -294,7 +380,12 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
       });
     } catch (err: any) {
       console.error('Erro na ordem:', err);
-      alert(`Falha na ordem: ${err.message || 'Erro de conexão'}`);
+      setModalNotice({
+        isOpen: true,
+        title: 'Falha na Ordem',
+        description: `Falha ao processar a ordem: ${err.message || 'Erro de conexão'}`,
+        variant: 'danger'
+      });
     } finally {
       setIsProcessingOrder(false);
       setProcessingCountdown(8);
@@ -672,6 +763,18 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
           </div>
         </div>
       )}
+
+      {/* Modal profissional TapRise para avisos da janela 21 */}
+      <TapRiseModal
+        isOpen={Boolean(modalNotice?.isOpen)}
+        title={modalNotice?.title || 'Aviso'}
+        description={modalNotice?.description}
+        confirmText="Entendido"
+        showCancel={false}
+        variant={modalNotice?.variant || 'info'}
+        onConfirm={() => setModalNotice(null)}
+        onCancel={() => setModalNotice(null)}
+      />
 
     </div>
   );

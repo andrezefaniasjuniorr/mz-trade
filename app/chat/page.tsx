@@ -35,6 +35,7 @@ import {
   Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import TapRiseModal from '@/components/TapRiseModal';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import {
@@ -878,6 +879,8 @@ export default function ChatPage() {
   const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
   const [recordingDuration, setRecordingDuration] = useState<number>(0);
   const [recordingTarget, setRecordingTarget] = useState<'group' | 'private'>('group');
+  const [msgToDelete, setMsgToDelete] = useState<{ id: string; text: string; isMyMessage: boolean } | null>(null);
+  const [isDeletingMsg, setIsDeletingMsg] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -1471,6 +1474,11 @@ export default function ChatPage() {
       try {
         const audioUrl = await uploadChatAudio(audioBlob);
 
+        // Atualiza a mensagem otimista imediatamente
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, isUploading: false, audioUrl } : m))
+        );
+
         // Firestore guarda só: tipo: "audio", audioUrl, duracao (SEM base64)
         await addDoc(collection(db, 'taprise_group_messages'), {
           uid: user.uid,
@@ -1522,6 +1530,10 @@ export default function ChatPage() {
 
       try {
         const audioUrl = await uploadChatAudio(audioBlob);
+
+        setPrivateMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, isUploading: false, audioUrl } : m))
+        );
 
         await addDoc(collection(db, 'private_chats', targetUid, 'messages'), {
           uid: user.uid,
@@ -2029,9 +2041,9 @@ export default function ChatPage() {
 
   // Apagar Mensagem: Admin pode apagar qualquer mensagem para todos; Usuários só podem apagar a sua própria
   const handleDeleteMessage = useCallback(
-    async (msgId: string) => {
+    (msgId: string) => {
       const msg = messages.find((m) => m.id === msgId);
-      const isMyMessage = msg && msg.uid === user?.uid;
+      const isMyMessage = Boolean(msg && msg.uid === user?.uid);
 
       if (!isAdmin && !isMyMessage) {
         showToast('Você só pode apagar as suas próprias mensagens.', 'error');
@@ -2039,33 +2051,41 @@ export default function ChatPage() {
       }
 
       const confirmText = isAdmin && !isMyMessage
-        ? 'Deseja apagar esta mensagem para todos os participantes do grupo (Ação Admin)?'
-        : 'Deseja apagar a sua mensagem?';
+        ? 'Deseja apagar esta mensagem para todos os participantes do grupo (Ação de Administrador)?'
+        : 'Deseja apagar a sua mensagem para todos?';
 
-      if (!confirm(confirmText)) return;
-
-      try {
-        const msgRef = doc(db, 'taprise_group_messages', msgId);
-        // Exclusão definitiva para remover para todos em tempo real
-        await deleteDoc(msgRef);
-        showToast(isAdmin && !isMyMessage ? 'Mensagem apagada para todos com sucesso.' : 'Sua mensagem foi apagada.', 'success');
-      } catch (err: any) {
-        console.warn('Erro ao apagar com deleteDoc, aplicando soft delete:', err);
-        try {
-          const msgRef = doc(db, 'taprise_group_messages', msgId);
-          await updateDoc(msgRef, {
-            isDeleted: true,
-            text: 'Esta mensagem foi removida.'
-          });
-          showToast('Mensagem removida com sucesso.', 'success');
-        } catch (updateErr) {
-          console.error('Erro ao remover mensagem:', updateErr);
-          showToast('Falha ao apagar mensagem.', 'error');
-        }
-      }
+      setMsgToDelete({ id: msgId, text: confirmText, isMyMessage });
     },
     [isAdmin, user, messages, showToast]
   );
+
+  const confirmDeleteMessage = useCallback(async () => {
+    if (!msgToDelete) return;
+    const { id: msgId, isMyMessage } = msgToDelete;
+    setIsDeletingMsg(true);
+
+    try {
+      const msgRef = doc(db, 'taprise_group_messages', msgId);
+      await deleteDoc(msgRef);
+      showToast(isAdmin && !isMyMessage ? 'Mensagem apagada para todos com sucesso.' : 'Sua mensagem foi apagada.', 'success');
+    } catch (err: any) {
+      console.warn('Erro ao apagar com deleteDoc, aplicando soft delete:', err);
+      try {
+        const msgRef = doc(db, 'taprise_group_messages', msgId);
+        await updateDoc(msgRef, {
+          isDeleted: true,
+          text: 'Esta mensagem foi removida.'
+        });
+        showToast('Mensagem removida com sucesso.', 'success');
+      } catch (updateErr) {
+        console.error('Erro ao remover mensagem:', updateErr);
+        showToast('Falha ao apagar mensagem.', 'error');
+      }
+    } finally {
+      setIsDeletingMsg(false);
+      setMsgToDelete(null);
+    }
+  }, [msgToDelete, isAdmin, showToast]);
 
   // Iniciar Edição da própria mensagem
   const handleStartEdit = useCallback((msg: GroupMessage) => {
@@ -2136,49 +2156,33 @@ export default function ChatPage() {
       />
 
       {/* MODAL DE PERMISSÃO DE MICROFONE PROFISSIONAL (NUNCA MOSTRA LINKS/URLS) */}
-      <AnimatePresence>
-        {showMicPermissionModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 12 }}
-              transition={{ duration: 0.18 }}
-              className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl text-center space-y-4 relative"
-            >
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shadow-lg">
-                <Mic className="w-7 h-7" />
-              </div>
+      {/* MODAL DE PERMISSÃO DE MICROFONE PROFISSIONAL (NUNCA MOSTRA LINKS/URLS) */}
+      <TapRiseModal
+        isOpen={showMicPermissionModal}
+        title="Permitir acesso ao microfone"
+        description="Para gravar e enviar notas de voz no chat com clareza e sem ruídos, precisamos de autorização para usar o microfone deste dispositivo."
+        confirmText="Permitir"
+        cancelText="Agora não"
+        onConfirm={handleConfirmMicPermission}
+        onCancel={() => setShowMicPermissionModal(false)}
+        variant="primary"
+        icon={<Mic className="w-6 h-6 text-blue-400" />}
+      />
 
-              <div className="space-y-1.5">
-                <h3 className="text-base font-bold text-white tracking-wide">
-                  Permitir acesso ao microfone
-                </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Para gravar e enviar notas de voz no chat com clareza e sem ruídos, precisamos de autorização para usar o microfone deste dispositivo.
-                </p>
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowMicPermissionModal(false)}
-                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700/80 transition cursor-pointer"
-                >
-                  Agora não
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmMicPermission}
-                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 shadow-md shadow-blue-600/30 transition cursor-pointer"
-                >
-                  Permitir
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE MENSAGEM */}
+      <TapRiseModal
+        isOpen={Boolean(msgToDelete)}
+        title="Remover Mensagem"
+        description={msgToDelete?.text}
+        confirmText="Apagar Mensagem"
+        cancelText="Cancelar"
+        isLoading={isDeletingMsg}
+        variant="danger"
+        onConfirm={confirmDeleteMessage}
+        onCancel={() => {
+          if (!isDeletingMsg) setMsgToDelete(null);
+        }}
+      />
 
       {/* Inputs de arquivo ocultos (aceita apenas jpg, png, webp max 3MB) */}
       <input

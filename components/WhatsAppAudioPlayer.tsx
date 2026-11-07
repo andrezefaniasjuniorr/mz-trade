@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Play, Pause, Loader2, Mic } from 'lucide-react';
 
+import { resolveAudioUrl, getCachedAudioUrl } from '@/lib/chatService';
+
 interface WhatsAppAudioPlayerProps {
   id: string;
   audioUrl: string;
@@ -54,6 +56,26 @@ export default function WhatsAppAudioPlayer({
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const waveContainerRef = useRef<HTMLDivElement | null>(null);
+  const resolvedSrcRef = useRef<string>(getCachedAudioUrl(audioUrl) || (audioUrl.startsWith('taprise://') ? '' : audioUrl));
+
+  // Pre-resolve taprise:// URLs in background so playback is instant
+  useEffect(() => {
+    if (audioUrl) {
+      const cached = getCachedAudioUrl(audioUrl);
+      if (cached) {
+        resolvedSrcRef.current = cached;
+      } else if (audioUrl.startsWith('taprise://')) {
+        resolveAudioUrl(audioUrl).then((resolved) => {
+          resolvedSrcRef.current = resolved;
+          if (audioRef.current && !audioRef.current.src) {
+            audioRef.current.src = resolved;
+          }
+        });
+      } else {
+        resolvedSrcRef.current = audioUrl;
+      }
+    }
+  }, [audioUrl]);
 
   // Deterministic waveform pattern for this audio
   const waveHeights = useMemo(() => generateWaveHeights(id || audioUrl || 'taprise', 30), [id, audioUrl]);
@@ -81,9 +103,15 @@ export default function WhatsAppAudioPlayer({
   }, [id]);
 
   // Initialize Audio instance safely
-  const getOrCreateAudio = useCallback(() => {
+  const getOrCreateAudio = useCallback(async (): Promise<HTMLAudioElement | null> => {
+    if (!resolvedSrcRef.current) {
+      resolvedSrcRef.current = await resolveAudioUrl(audioUrl);
+    }
+    const targetSrc = resolvedSrcRef.current;
+    if (!targetSrc) return null;
+
     if (!audioRef.current) {
-      const audio = new Audio(audioUrl);
+      const audio = new Audio(targetSrc);
       audio.preload = 'metadata';
       audio.playbackRate = speed;
 
@@ -115,11 +143,13 @@ export default function WhatsAppAudioPlayer({
       };
 
       audioRef.current = audio;
+    } else if (audioRef.current.src !== targetSrc && targetSrc) {
+      audioRef.current.src = targetSrc;
     }
     return audioRef.current;
   }, [audioUrl, speed]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!canPlay) {
       if (onRequireAuth) onRequireAuth();
       return;
@@ -127,24 +157,29 @@ export default function WhatsAppAudioPlayer({
 
     if (isUploading) return;
 
-    const audio = getOrCreateAudio();
-
-    if (isPlaying) {
-      audio.pause();
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
       setIsPlaying(false);
-    } else {
-      // Notify other players to stop
-      window.dispatchEvent(new CustomEvent('taprise-audio-play', { detail: { id } }));
-      setIsLoading(true);
-      audio.play().then(() => {
-        setIsPlaying(true);
-        setIsLoading(false);
-      }).catch((err) => {
-        console.warn('Falha ao reproduzir áudio:', err);
-        setIsPlaying(false);
-        setIsLoading(false);
-      });
+      return;
     }
+
+    setIsLoading(true);
+    const audio = await getOrCreateAudio();
+    if (!audio) {
+      setIsLoading(false);
+      return;
+    }
+
+    // Notify other players to stop
+    window.dispatchEvent(new CustomEvent('taprise-audio-play', { detail: { id } }));
+    audio.play().then(() => {
+      setIsPlaying(true);
+      setIsLoading(false);
+    }).catch((err) => {
+      console.warn('Falha ao reproduzir áudio:', err);
+      setIsPlaying(false);
+      setIsLoading(false);
+    });
   };
 
   const cycleSpeed = (e: React.MouseEvent) => {

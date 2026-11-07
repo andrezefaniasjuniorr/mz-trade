@@ -68,6 +68,10 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /chat_audios/{audioId} {
+      allow read, write: if isSignedIn();
+    }
+
     // Private Chats (User <-> Admin)
     match /private_chats/{userId} {
       allow read, write: if isOwner(userId) || isAdmin();
