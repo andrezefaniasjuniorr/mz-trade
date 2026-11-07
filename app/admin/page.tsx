@@ -193,13 +193,13 @@ export default function AdminPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-  // REGRA 1 - ACESSO EXCLUSIVO:
+  // ACESSO EXCLUSIVO SUPER ADMIN
   const isAdmin = Boolean(user?.email && user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim());
 
-  // Active Tab: 1 - Visão Geral, 2 - Usuários, 3 - Levantamentos, 4 - Jogo 21h, 5 - Mercado, 6 - Comunicados, 7 - Dica do Instrutor, 8 - Chat Global
+  // Aba Ativa: 'visao-geral' | 'usuarios' | 'levantamentos' | 'jogo-21h' | 'mercado' | 'comunicados' | 'dica-instrutor' | 'chat'
   const [activeTab, setActiveTab] = useState<'visao-geral' | 'usuarios' | 'levantamentos' | 'jogo-21h' | 'mercado' | 'comunicados' | 'dica-instrutor' | 'chat'>('visao-geral');
 
-  // Chat message delete modal state
+  // Estado de exclusão de mensagens do chat
   const [chatMsgToDelete, setChatMsgToDelete] = useState<string | null>(null);
   const [isDeletingChatMsg, setIsDeletingChatMsg] = useState(false);
 
@@ -216,7 +216,7 @@ export default function AdminPage() {
   });
   const [isSavingInstructorTip, setIsSavingInstructorTip] = useState<boolean>(false);
 
-  // Chat notice broadcast state
+  // Transmissão de aviso no chat
   const [chatNoticeText, setChatNoticeText] = useState<string>('');
   const [isSendingChatNotice, setIsSendingChatNotice] = useState<boolean>(false);
   const [pinChatNotice, setPinChatNotice] = useState<boolean>(true);
@@ -231,7 +231,7 @@ export default function AdminPage() {
   });
   const [pinnedChatConfig, setPinnedChatConfig] = useState<any>(null);
 
-  // State
+  // Usuários
   const [usersList, setUsersList] = useState<UserRecord[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -244,6 +244,8 @@ export default function AdminPage() {
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [userSearch, setUserSearch] = useState<string>('');
   const [filterZeroBalance, setFilterZeroBalance] = useState<boolean>(false);
+
+  // Levantamentos (M-Pesa / e-Mola)
   const [adminWithdrawals, setAdminWithdrawals] = useState<WithdrawalAdminRecord[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -256,7 +258,7 @@ export default function AdminPage() {
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
   const [isProcessingWithdrawal, setIsProcessingWithdrawal] = useState<string | null>(null);
 
-  // Stats
+  // Estatísticas
   const [ordersTodayCount, setOrdersTodayCount] = useState<number>(0);
   const [recentTransactions, setRecentTransactions] = useState<TransactionRecord[]>([]);
 
@@ -309,13 +311,12 @@ export default function AdminPage() {
   const [isPayingBonus, setIsPayingBonus] = useState<boolean>(false);
   const [showManualReferralSelect, setShowManualReferralSelect] = useState<boolean>(false);
 
-  // Referrer Lookup: tenta por invitedBy, depois por invitedByCode, depois manualReferrerUid
+  // Busca do Indicador por invitedBy ou invitedByCode
   const referrerFromList = useMemo(() => {
     if (!selectedUserForCredit) return null;
     const invUid = selectedUserForCredit.invitedBy || manualReferrerUid;
     const invCode = (selectedUserForCredit.invitedByCode || '').toUpperCase().trim();
 
-    // 1. Procurar por UID direto se disponível
     if (invUid) {
       const inMem = usersList.find((u) => u.id === invUid || u.uid === invUid);
       if (inMem) {
@@ -336,7 +337,6 @@ export default function AdminPage() {
       }
     }
 
-    // 2. Se não tem invitedBy mas tem invitedByCode, procurar pelo código no usersList
     if (invCode) {
       const inMemByCode = usersList.find((u) => {
         const uCode = (u.inviteCode || '').toUpperCase().trim();
@@ -384,9 +384,7 @@ export default function AdminPage() {
   const targetInvitedByCode = selectedUserForCredit?.invitedByCode;
 
   useEffect(() => {
-    if (!targetInvitedBy || referrerFromList) {
-      return;
-    }
+    if (!targetInvitedBy || referrerFromList) return;
     const invCode = targetInvitedByCode || targetInvitedBy.slice(0, 8);
     let active = true;
 
@@ -438,7 +436,7 @@ export default function AdminPage() {
 
   const referrerDetails = referrerFromList || fetchedReferrer;
 
-  // Market hours & pause configuration
+  // Configuração de Mercado e Pausa
   const [marketConfig, setMarketConfig] = useState<MarketHoursConfig>({
     scheduleText: 'Segunda a Sexta às 21:00',
     openHour: 8,
@@ -449,7 +447,7 @@ export default function AdminPage() {
   });
   const [isSavingMarket, setIsSavingMarket] = useState<boolean>(false);
 
-  // Announcement state
+  // Comunicado Geral
   const [announcement, setAnnouncement] = useState<AnnouncementConfig>({
     active: true,
     title: 'Aviso da Mesa de Operações TapRise',
@@ -469,7 +467,7 @@ export default function AdminPage() {
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // PROTEÇÃO DE ROTA (REGRA 1)
+  // Proteção de Rota
   useEffect(() => {
     if (!authLoading) {
       if (!user || !isAdmin) {
@@ -635,12 +633,9 @@ export default function AdminPage() {
           description: d.description || ''
         });
       });
-      // Ordenar por timestamp decrescente
       list.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
       setRecentTransactions(list);
 
-      // Separar coletas do Jogo 21h hoje
-      const todayStr = getMaputoTodayDate();
       const claimsToday = list.filter((t) => t.type === 'bonus_21h');
       setDailyClaimsToday(claimsToday);
     }, (e) => console.warn('Erro transações:', e));
@@ -671,7 +666,6 @@ export default function AdminPage() {
     // 7. Ouvir Pedidos de Levantamento (M-Pesa / e-Mola) em tempo real
     const withdrawalsRef = collection(db, 'withdrawals');
 
-    // Carregamento inicial imediato via getDocs
     getDocs(withdrawalsRef).then((snap) => {
       const list: WithdrawalAdminRecord[] = [];
       snap.forEach((d) => {
@@ -754,7 +748,6 @@ export default function AdminPage() {
           active: true
         });
       } else {
-        // Fallback para admin_config/instructor_tip
         const tipDocRef = doc(db, 'admin_config', 'instructor_tip');
         getDoc(tipDocRef).then((oldSnap) => {
           if (oldSnap.exists()) {
@@ -841,7 +834,7 @@ export default function AdminPage() {
     return adminWithdrawals;
   }, [adminWithdrawals, withdrawalFilter]);
 
-  // Ação Admin: Aceitar / Fechar Levantamento (após transferência via M-Pesa / e-Mola)
+  // Ação Admin: Aceitar / Fechar Levantamento (M-Pesa / e-Mola)
   const handleAcceptWithdrawal = async (w: WithdrawalAdminRecord) => {
     try {
       setIsProcessingWithdrawal(w.id);
@@ -855,7 +848,6 @@ export default function AdminPage() {
         fechadoEm: serverTimestamp()
       });
 
-      // Atualizar lista local imediatamente para feedback instantâneo
       setAdminWithdrawals((prev) =>
         prev.map((item) =>
           item.id === w.id
@@ -869,7 +861,6 @@ export default function AdminPage() {
         )
       );
 
-      // Registar confirmação na coleção 'transactions'
       if (w.uid) {
         await addDoc(collection(db, 'transactions'), {
           uid: w.uid,
@@ -911,7 +902,6 @@ export default function AdminPage() {
         processedBy: user?.email || ADMIN_EMAIL
       });
 
-      // Atualizar lista local imediatamente
       setAdminWithdrawals((prev) =>
         prev.map((item) =>
           item.id === w.id
@@ -925,7 +915,6 @@ export default function AdminPage() {
         )
       );
 
-      // Devolver o saldo total debitado (incluindo taxa de 5%)
       if (w.uid) {
         const refundAmount = Number(w.totalDebited || ((w.amount || 0) * 1.05));
         const userRef = doc(db, 'users', w.uid);
@@ -942,7 +931,6 @@ export default function AdminPage() {
           });
         } catch {}
 
-        // Atualizar lista em memória de usuários no admin
         setUsersList((prev) =>
           prev.map((u) => {
             if (u.id === w.uid) {
@@ -979,7 +967,6 @@ export default function AdminPage() {
     }
   };
 
-  // Compatibilidade legada
   const handleUpdateWithdrawalStatus = async (id: string, newStatus: 'COMPLETED' | 'REJECTED') => {
     const target = adminWithdrawals.find(w => w.id === id);
     if (!target) return;
@@ -990,7 +977,6 @@ export default function AdminPage() {
     }
   };
 
-  // Usuários Filtrados (Filtro 'Apenas Sem Saldo (0 MT)' real com saldoDisponivel == 0)
   const filteredUsers = useMemo(() => {
     return usersList.filter((u) => {
       const q = userSearch.toLowerCase();
@@ -1009,7 +995,6 @@ export default function AdminPage() {
     });
   }, [usersList, userSearch, filterZeroBalance]);
 
-  // Helper para formatar data de cadastro
   const formatRegistrationDate = (val: any) => {
     if (!val) return 'Recente';
     if (val.toDate) {
@@ -1042,7 +1027,7 @@ export default function AdminPage() {
     return 'Recente';
   };
 
-  // AÇÃO: Confirmar Crédito de Saldo ao Usuário (Requisito 2)
+  // AÇÃO: Confirmar Crédito de Saldo ao Usuário
   const handleConfirmCredit = async () => {
     if (!selectedUserForCredit) return;
     const amountNum = parseFloat(creditAmount);
@@ -1064,7 +1049,7 @@ export default function AdminPage() {
       );
       const newBalance = Number((currentBalance + amountNum).toFixed(2));
 
-      // 1. REQUISITO 2 EXATO: doc(db, "usuarios", userId) -> updateDoc com increment
+      // 1. Atualizar coleção 'usuarios'
       const usuarioRef = doc(db, 'usuarios', targetUserId);
       await setDoc(usuarioRef, {
         saldoDisponivel: increment(amountNum),
@@ -1075,7 +1060,7 @@ export default function AdminPage() {
         ultimoCreditoEm: serverTimestamp()
       }, { merge: true });
 
-      // 2. Atualizar documento na coleção 'users' para sincronização instantânea em toda a aplicação
+      // 2. Atualizar coleção 'users'
       const userRef = doc(db, 'users', targetUserId);
       await setDoc(userRef, {
         saldoDisponivel: increment(amountNum),
@@ -1090,7 +1075,7 @@ export default function AdminPage() {
         atualizadoEm: serverTimestamp()
       }, { merge: true });
 
-      // 3. Registar log de transações
+      // 3. Log de transação
       await addDoc(collection(db, 'transactions'), {
         userId: targetUserId,
         uid: targetUserId,
@@ -1105,7 +1090,7 @@ export default function AdminPage() {
         description: `Crédito de saldo (+${amountNum.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT) pelo Administrador`
       });
 
-      // 4. REQUISITO: Pagar 5% de comissão ao indicador SE e SOMENTE SE o indicador já tiver efetuado o 1º depósito
+      // 4. Comissão de 5% ao indicador se o indicador tiver efetuado o 1º depósito
       const effectiveReferrerUid = selectedUserForCredit.invitedBy || referrerDetails?.id || manualReferrerUid;
       if (effectiveReferrerUid && !selectedUserForCredit.commissionPaid && effectiveReferrerUid !== targetUserId) {
         const referrerUid = effectiveReferrerUid;
@@ -1120,7 +1105,6 @@ export default function AdminPage() {
         );
 
         if (!referrerHasDeposited) {
-          // Indicador ainda não realizou depósito: REGRA DETERMINA QUE NÃO RECEBE
           await updateDoc(userRef, {
             invitedBy: referrerUid,
             commissionPaid: false,
@@ -1134,12 +1118,10 @@ export default function AdminPage() {
           } catch {}
           showToast(`Aviso de Convite: O indicador (${referrerDetails?.nome || 'Indicador'}) ainda não realizou o 1º depósito, logo NÃO é elegível para receber os 5%.`, 'info');
         } else {
-          // Indicador elegível: paga os 5% de comissão
           const commissionAmount = Number((amountNum * 0.05).toFixed(2));
 
           if (commissionAmount > 0) {
             try {
-              // A. Creditar saldo do indicador em users/{invitedBy}
               const referrerRef = doc(db, 'users', referrerUid);
               await updateDoc(referrerRef, {
                 balance: increment(commissionAmount),
@@ -1150,7 +1132,6 @@ export default function AdminPage() {
                 atualizadoEm: serverTimestamp()
               });
 
-              // B. Também atualizar usuarios/{invitedBy} para compatibilidade
               try {
                 const refUsuarioDoc = doc(db, 'usuarios', referrerUid);
                 await updateDoc(refUsuarioDoc, {
@@ -1161,7 +1142,6 @@ export default function AdminPage() {
                 });
               } catch {}
 
-              // C. Registar na coleção 'commissions'
               await addDoc(collection(db, 'commissions'), {
                 referrerUid: referrerUid,
                 referredUid: targetUserId,
@@ -1175,7 +1155,6 @@ export default function AdminPage() {
                 description: `Bónus de convite de 5% sobre 1º crédito de ${amountNum.toFixed(2)} MT`
               });
 
-              // D. Registar no histórico do indicador como "Bônus de convite"
               await addDoc(collection(db, 'transactions'), {
                 userId: referrerUid,
                 uid: referrerUid,
@@ -1189,7 +1168,6 @@ export default function AdminPage() {
                 description: `Bónus de convite (+5%): +${commissionAmount.toFixed(2)} MT pelo 1º crédito de ${selectedUserForCredit.nome || 'convidado'}`
               });
 
-              // E. Marcar commissionPaid = true para nunca pagar de novo a este usuário
               await updateDoc(userRef, {
                 invitedBy: referrerUid,
                 commissionPaid: true,
@@ -1222,7 +1200,7 @@ export default function AdminPage() {
     }
   };
 
-  // Ação Admin: Creditar 5% diretamente ao Indicador (Apenas 1x por convidado)
+  // Ação Admin: Creditar 5% diretamente ao Indicador
   const handlePay5PercentBonusDirectly = async () => {
     if (!selectedUserForCredit) return;
     const targetUserId = selectedUserForCredit.id || selectedUserForCredit.uid;
@@ -1267,7 +1245,6 @@ export default function AdminPage() {
       );
       const commissionAmount = Number((baseVal * 0.05).toFixed(2));
 
-      // 1. Atualizar saldo do indicador em users/{uid}
       const refUserDoc = doc(db, 'users', effectiveReferrerUid);
       await updateDoc(refUserDoc, {
         balance: increment(commissionAmount),
@@ -1278,7 +1255,6 @@ export default function AdminPage() {
         atualizadoEm: serverTimestamp()
       });
 
-      // 2. Sincronizar usuarios/{uid}
       try {
         await updateDoc(doc(db, 'usuarios', effectiveReferrerUid), {
           saldoDisponivel: increment(commissionAmount),
@@ -1288,7 +1264,6 @@ export default function AdminPage() {
         });
       } catch {}
 
-      // 3. Atualizar usuário convidado para commissionPaid = true
       const targetUserDoc = doc(db, 'users', targetUserId);
       await updateDoc(targetUserDoc, {
         invitedBy: effectiveReferrerUid,
@@ -1304,7 +1279,6 @@ export default function AdminPage() {
         });
       } catch {}
 
-      // 4. Registar na coleção 'commissions'
       await addDoc(collection(db, 'commissions'), {
         referrerUid: effectiveReferrerUid,
         referredUid: targetUserId,
@@ -1318,7 +1292,6 @@ export default function AdminPage() {
         description: `Bónus de convite de 5% sobre ${baseVal.toFixed(2)} MT`
       });
 
-      // 5. Registar no histórico do indicador como "Bônus de convite"
       await addDoc(collection(db, 'transactions'), {
         userId: effectiveReferrerUid,
         uid: effectiveReferrerUid,
@@ -1332,7 +1305,6 @@ export default function AdminPage() {
         description: `Bónus de convite (+5%): +${commissionAmount.toFixed(2)} MT pela indicação de ${selectedUserForCredit.nome || selectedUserForCredit.email}`
       });
 
-      // 6. Atualizar estado local
       setSelectedUserForCredit((prev) => prev ? {
         ...prev,
         invitedBy: effectiveReferrerUid,
@@ -1363,7 +1335,6 @@ export default function AdminPage() {
     }
   };
 
-  // Ação Admin: Vincular Indicador Manualmente
   const handleLinkReferrer = async () => {
     if (!selectedUserForCredit || !manualReferrerUid) {
       showToast('Selecione um investidor da lista para vincular.', 'error');
@@ -1391,7 +1362,7 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA 2: Bónus Manual Rápido (+500MT ou +1000MT) com 1 clique imediato
+  // Bónus Rápido (+500 MT ou +1000 MT)
   const handleQuickCredit = async (targetUser: UserRecord, amount: number) => {
     try {
       const currentBalance = targetUser.balance || targetUser.saldoVirtual || 0;
@@ -1423,7 +1394,6 @@ export default function AdminPage() {
         description: `Bónus manual rápido de +${amount} MT atribuído pelo Administrador`
       });
 
-      // Pagar 5% de comissão ao indicador se for 1º crédito E se o indicador já tiver feito depósito
       if (targetUser.invitedBy && !targetUser.commissionPaid) {
         const referrerUid = targetUser.invitedBy;
         const refInMem = usersList.find(u => u.id === referrerUid);
@@ -1517,7 +1487,6 @@ export default function AdminPage() {
         forceOpen: targetForce
       }));
 
-      // Mensagens do sistema automáticas no Chat Global para todos os investidores
       try {
         await addDoc(collection(db, 'taprise_group_messages'), {
           uid: user?.uid || 'admin',
@@ -1544,7 +1513,7 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA: Enviar aviso no chat (destaque amarelo como type: 'system')
+  // Transmitir aviso oficial no chat
   const handleSendChatNotice = async () => {
     if (!chatNoticeText.trim()) {
       showToast('Por favor, digite a mensagem de aviso a transmitir no chat.', 'error');
@@ -1576,7 +1545,6 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA: Apagar mensagem do chat (Soft delete)
   const handleDeleteChatMessage = (msgId: string) => {
     setChatMsgToDelete(msgId);
   };
@@ -1599,7 +1567,6 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA: Fixar / Desafixar mensagem
   const handlePinChatMessage = async (msg: any) => {
     try {
       await setDoc(doc(db, 'admin_config', 'chat'), {
@@ -1628,7 +1595,6 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA 3: Alternar Pausa de Commodity
   const handleToggleCommodityPause = async (commodityId: string) => {
     try {
       const isCurrentlyPaused = !!marketConfig.pausedAssets[commodityId];
@@ -1659,7 +1625,6 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA 3: Salvar Horário Oficial de Trading
   const handleSaveMarketHours = async () => {
     try {
       setIsSavingMarket(true);
@@ -1677,7 +1642,6 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA 4: Emitir Comunicado Geral (Terminal & Grupo de Chat Global)
   const handleSaveAnnouncement = async () => {
     if (!announcement.title.trim() && !announcement.message.trim()) {
       showToast('Por favor, preencha o título ou a mensagem do comunicado.', 'error');
@@ -1687,7 +1651,6 @@ export default function AdminPage() {
     try {
       setIsSavingAnnouncement(true);
 
-      // 1. Salvar no admin_config/announcement (banner superior no terminal)
       const annDocRef = doc(db, 'admin_config', 'announcement');
       await setDoc(annDocRef, {
         ...announcement,
@@ -1695,7 +1658,6 @@ export default function AdminPage() {
         updatedAt: serverTimestamp()
       });
 
-      // 2. Transmitir no Grupo de Chat Global
       let chatMessageCreated = false;
       const textToPublish = announcement.message.trim() || announcement.title.trim();
       const titleToPublish = announcement.title.trim() || 'COMUNICADO OFICIAL DA ADMINISTRAÇÃO';
@@ -1720,7 +1682,6 @@ export default function AdminPage() {
 
         chatMessageCreated = true;
 
-        // 3. Se marcado para fixar no chat
         if (pinInGroupChat) {
           const pinnedTextSnippet = `${titleToPublish}: ${textToPublish}`.slice(0, 140);
           await setDoc(doc(db, 'admin_config', 'chat'), {
@@ -1748,7 +1709,7 @@ export default function AdminPage() {
     }
   };
 
-  // AÇÃO ABA: Salvar Dica do Instrutor (Requisito 3: doc(db, "config", "dicaInstrutor"))
+  // Salvar Dica do Instrutor (doc: config/dicaInstrutor)
   const handleSaveInstructorTip = async () => {
     const textToSave = instructorTipText.trim() || instructorTip.content.trim();
     if (!textToSave) {
@@ -1758,7 +1719,6 @@ export default function AdminPage() {
     try {
       setIsSavingInstructorTip(true);
 
-      // Requisito 3 Exato: doc(db, "config", "dicaInstrutor")
       const tipDocRef = doc(db, 'config', 'dicaInstrutor');
       await setDoc(tipDocRef, {
         texto: textToSave,
@@ -1767,7 +1727,6 @@ export default function AdminPage() {
         atualizadoEm: serverTimestamp()
       }, { merge: true });
 
-      // Sincronizar com admin_config/instructor_tip
       const oldDocRef = doc(db, 'admin_config', 'instructor_tip');
       await setDoc(oldDocRef, {
         title: 'Dica do Instrutor',
@@ -1800,7 +1759,7 @@ export default function AdminPage() {
   }
 
   if (!isAdmin) {
-    return null; // O useEffect redireciona imediatamente para /
+    return null;
   }
 
   return (
@@ -1828,7 +1787,6 @@ export default function AdminPage() {
       {/* TOP ADMIN HEADER */}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 shadow-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Logo & Super Admin Badge */}
           <div className="flex items-center space-x-3">
             <Link href="/" className="flex items-center space-x-3 group">
               <div className="bg-blue-600 group-hover:bg-blue-500 text-white p-2 rounded-xl flex items-center justify-center font-black tracking-widest text-base shadow-md shadow-blue-600/30 transition">
@@ -1847,7 +1805,6 @@ export default function AdminPage() {
             </Link>
           </div>
 
-          {/* Admin Identity & Return to Terminal */}
           <div className="flex items-center space-x-3">
             <div className="hidden sm:flex flex-col text-right pr-2">
               <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 justify-end">
@@ -1926,7 +1883,6 @@ export default function AdminPage() {
           <div className="space-y-6">
             {/* KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Total Users */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total de Usuários</span>
@@ -1946,7 +1902,6 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* Total Balance in Circulation */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Saldo Total em Circulação</span>
@@ -1962,7 +1917,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Open Orders Today */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ordens Abertas</span>
@@ -1976,7 +1930,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Market Status */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Estado do Mercado</span>
@@ -1994,9 +1947,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* ======================================================== */}
-            {/* CONTROLE CENTRAL DA JANELA 21H • MANIPULAÇÃO ALTA / BAIXA */}
-            {/* ======================================================== */}
+            {/* CONTROLE CENTRAL DA JANELA 21H • ALTA / BAIXA */}
             <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/70 border border-slate-700/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-5">
                 <div>
@@ -2031,9 +1982,8 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Botões Grandes de Manipulação Alta e Baixa */}
+              {/* Botões de Manipulação Alta e Baixa */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
-                {/* Definir ALTA */}
                 <button
                   type="button"
                   onClick={() => handleSaveDailyConfig('buy')}
@@ -2058,7 +2008,6 @@ export default function AdminPage() {
                   </div>
                 </button>
 
-                {/* Definir BAIXA */}
                 <button
                   type="button"
                   onClick={() => handleSaveDailyConfig('sell')}
@@ -2084,10 +2033,8 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              {/* Barra de Testes & Forçar Janela */}
+              {/* Forçar Janela Aberta & Testes */}
               <div className="mt-5 pt-4 border-t border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-                
-                {/* Forçar Janela Aberta */}
                 <div className="flex items-center justify-between gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800 flex-1">
                   <div>
                     <span className="text-xs font-bold text-white block">Forçar Janela Aberta (Modo de Teste)</span>
@@ -2109,7 +2056,6 @@ export default function AdminPage() {
                   </button>
                 </div>
 
-                {/* Simulador de Teste do Admin */}
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-xs font-bold text-slate-400 hidden sm:inline">Simular Teste:</span>
                   <button
@@ -2127,10 +2073,8 @@ export default function AdminPage() {
                     <span>🧪 Testar VENDA</span>
                   </button>
                 </div>
-
               </div>
 
-              {/* Resultado do Teste Imediato */}
               {adminTestResult && (
                 <div className={`mt-3 p-3.5 rounded-xl border text-xs font-mono flex items-center justify-between ${
                   adminTestResult.won
@@ -2149,9 +2093,7 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* ======================================================== */}
-            {/* MESA DE PEDIDOS DE LEVANTAMENTO (M-PESA / E-MOLA) NA VISÃO GERAL */}
-            {/* ======================================================== */}
+            {/* MESA DE PEDIDOS DE LEVANTAMENTO NA VISÃO GERAL */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                 <div className="flex items-center space-x-3">
@@ -2335,9 +2277,8 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Quick Actions & Audit Trail */}
+            {/* Acesso Rápido da Mesa & Transações */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Quick Summary Card */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
                   <Sliders className="w-4 h-4 text-blue-400" />
@@ -2385,7 +2326,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Recent Admin Transactions (Logs) */}
               <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2423,7 +2363,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* SEÇÃO RÁPIDA: 📘 Dica do Instrutor - Controle Central na Visão Geral */}
+            {/* Dica do Instrutor - Visão Geral */}
             <div className="bg-[#111a2e] border border-[#1e293b] rounded-2xl p-5 shadow-xl space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1e293b] pb-3.5">
                 <div className="flex items-center space-x-2.5">
@@ -2494,17 +2434,23 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+        Aqui está a Parte 3 de 3 do Arquivo 4: app/admin/page.tsx (100% completa, sem
+omissões).
 
-        {/* ======================================================== */}
-        {/* ABA 2: USUÁRIOS & ATRIBUIÇÃO DE SALDO */}
+Cole este bloco imediatamente abaixo do final da Parte 2 para concluir o arquivo
+perfeitamente.
+
+ARQUIVO 4 (PARTE 3 DE 3): app/admin/page.tsx
+
+(Cole exatamente após o fechamento da Aba 1 da Parte 2 até o fim)
+
         {/* ======================================================== */}
         {/* ABA 2: GESTÃO DE USUÁRIOS & ATRIBUIÇÃO DE SALDO */}
         {/* ======================================================== */}
         {activeTab === 'usuarios' && (
           <div className="space-y-5">
-            {/* Control Bar: Search and Filters */}
+            {/* Barra de Pesquisa e Filtros */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#111a2e] p-4 rounded-2xl border border-[#1e293b] shadow-xl">
-              {/* Search */}
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -2516,7 +2462,6 @@ export default function AdminPage() {
                 />
               </div>
 
-              {/* Filter Zero Balance */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setFilterZeroBalance(!filterZeroBalance)}
@@ -2533,7 +2478,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Users Data Table */}
+            {/* Tabela de Investidores */}
             <div className="bg-[#111a2e] border border-[#1e293b] rounded-2xl shadow-2xl overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-[#1e293b] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
@@ -2580,7 +2525,6 @@ export default function AdminPage() {
                         const isZero = balance <= 0;
                         return (
                           <tr key={u.id} className="hover:bg-[#0a1020]/50 transition group">
-                            {/* Investidor: Avatar, Nome, ID, Província */}
                             <td className="py-3.5 px-4 font-bold text-slate-100">
                               <div className="flex items-center space-x-3">
                                 <div className="w-9 h-9 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 font-black flex items-center justify-center shrink-0 text-sm shadow-inner">
@@ -2602,7 +2546,6 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* Email */}
                             <td className="py-3.5 px-4 text-slate-300 font-mono text-xs">
                               <div>{u.email || '—'}</div>
                               {(u.invitedBy || u.invitedByCode) && (
@@ -2623,7 +2566,6 @@ export default function AdminPage() {
                               )}
                             </td>
 
-                            {/* Saldo Disponível */}
                             <td className="py-3.5 px-4 text-right font-black">
                               {isZero ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
@@ -2637,12 +2579,10 @@ export default function AdminPage() {
                               )}
                             </td>
 
-                            {/* Data Cadastro */}
                             <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">
                               {formatRegistrationDate(u.criadoEm)}
                             </td>
 
-                            {/* Botão de Ação: 💳 Creditar / Gerir */}
                             <td className="py-3.5 px-4 text-center">
                               <button
                                 type="button"
@@ -2668,12 +2608,11 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* MODAL PROFISSIONAL: CREDITAR / GERIR SALDO (REQUISITO 2) */}
+        {/* MODAL: CREDITAR / GERIR SALDO */}
         {selectedUserForCredit && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto overflow-x-hidden animate-in zoom-in-95 duration-150">
               
-              {/* Header com Seta para Recuar (←) e Botão Fechar (X) */}
               <div className="flex items-center justify-between border-b border-[#1e293b] pb-3 gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <button
@@ -2709,7 +2648,6 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              {/* Informações do Usuário */}
               <div className="p-3.5 bg-[#0a1020] rounded-2xl border border-[#1e293b] space-y-2 text-xs">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Investidor:</span>
@@ -2741,7 +2679,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Botões Rápidos (+1.000 MT, +5.000 MT, +10.000 MT) */}
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Escolha Rápida de Valor
@@ -2768,7 +2705,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Input Customizado */}
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Valor a Creditar (MT)
@@ -2787,7 +2723,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Previsão do Novo Saldo */}
               <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl flex items-center justify-between text-xs">
                 <span className="text-emerald-300 font-bold">Novo Saldo Final:</span>
                 <span className="text-base font-black text-emerald-400">
@@ -2801,7 +2736,7 @@ export default function AdminPage() {
                 </span>
               </div>
 
-              {/* Detalhes de Indicação / Origem do Cadastro */}
+              {/* Seção do Indicador e 5% de Comissão */}
               {(() => {
                 const activeReferrer = referrerDetails;
                 const hasReferrer = Boolean(
@@ -2811,7 +2746,6 @@ export default function AdminPage() {
                   manualReferrerUid
                 );
 
-                // Caso 1: Usuário entrou DIRETO (sem convite)
                 if (!hasReferrer && !showManualReferralSelect) {
                   return (
                     <div className="p-3.5 bg-[#0a1020] border border-[#1e293b] rounded-2xl space-y-2 text-xs">
@@ -2843,7 +2777,6 @@ export default function AdminPage() {
                   );
                 }
 
-                // Caso 2: Usuário TEM indicador ou admin abriu para associar
                 const baseForBonus = Math.max(
                   parseFloat(creditAmount) || 0,
                   Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 1000)
@@ -2876,7 +2809,6 @@ export default function AdminPage() {
                     </div>
 
                     <div className="text-slate-200 space-y-2 max-w-full">
-                      {/* Quem o convidou */}
                       <div className="flex justify-between items-start gap-2">
                         <span className="text-slate-400 font-semibold shrink-0">Indicador:</span>
                         <div className="text-right min-w-0 max-w-[65%]">
@@ -2898,7 +2830,6 @@ export default function AdminPage() {
                         </div>
                       </div>
 
-                      {/* Status de Elegibilidade do Indicador (Obrigatório ter 1º depósito) */}
                       {activeReferrer && (
                         <div className={`p-2 rounded-xl border flex items-center justify-between text-[11px] ${
                           isReferrerEligible
@@ -2923,7 +2854,6 @@ export default function AdminPage() {
                         </div>
                       )}
 
-                      {/* Seletor manual para associar ou alterar indicador */}
                       {(!activeReferrer || showManualReferralSelect) && (
                         <div className="p-2.5 bg-slate-900/95 rounded-xl border border-slate-700 space-y-2 mt-1 max-w-full overflow-hidden">
                           <div className="flex items-center justify-between">
@@ -2967,7 +2897,6 @@ export default function AdminPage() {
                         </div>
                       )}
 
-                      {/* Valores Financeiros da Comissão (só quando tem indicador vinculado) */}
                       {activeReferrer && (
                         <>
                           <div className="p-2 bg-blue-900/30 rounded-xl border border-blue-800/40 space-y-1 text-[11px]">
@@ -3026,7 +2955,6 @@ export default function AdminPage() {
                 );
               })()}
 
-              {/* Botões: Cancelar e Confirmar Crédito */}
               <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
@@ -3063,7 +2991,7 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA: GESTÃO DE LEVANTAMENTOS (M-PESA / E-MOLA) */}
+        {/* ABA 3: GESTÃO DE LEVANTAMENTOS (M-PESA / E-MOLA) */}
         {/* ======================================================== */}
         {activeTab === 'levantamentos' && (
           <div className="space-y-6">
@@ -3093,7 +3021,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Instruções de Operação */}
               <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl flex items-start gap-3 text-xs text-emerald-200">
                 <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
@@ -3107,12 +3034,12 @@ export default function AdminPage() {
                     2. A taxa de 5% foi automaticamente debitada do saldo que sobra na conta do investidor.
                   </p>
                   <p>
-                    3. <strong>Após realizar a transferência, clique no botão &quot;Fechar&quot; no pedido de levantamento</strong>.
+                    3. <strong>Após realizar a transferência, clique no botão &quot;Aceitar&quot; no pedido de levantamento</strong>.
                   </p>
                 </div>
               </div>
 
-              {/* Filtros de Levantamento */}
+              {/* Filtros */}
               <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
                 <button
                   type="button"
@@ -3279,7 +3206,7 @@ export default function AdminPage() {
                                     onClick={() => handleAcceptWithdrawal(w)}
                                     disabled={isProcessingWithdrawal === w.id}
                                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/30 cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Aceitar / Fechar"
+                                    title="Após realizar a transferência via M-Pesa / e-Mola, clique em Aceitar"
                                   >
                                     <Check className="w-3.5 h-3.5" />
                                     <span>{isProcessingWithdrawal === w.id ? 'A processar...' : '✓ Aceitar'}</span>
@@ -3318,11 +3245,10 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA: JOGO 21H - JANELA DE RECOMPENSA NOTURNA DIÁRIA */}
+        {/* ABA 4: JOGO 21H - JANELA DE RECOMPENSA NOTURNA DIÁRIA */}
         {/* ======================================================== */}
         {activeTab === 'jogo-21h' && (
           <div className="space-y-6">
-            {/* Header Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
               <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl -z-0 pointer-events-none"></div>
               
@@ -3344,7 +3270,6 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* Maputo Live Clock Badge */}
                 <div className="flex items-center gap-3 bg-slate-950 px-4 py-2.5 rounded-2xl border border-slate-800">
                   <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
                   <div>
@@ -3361,7 +3286,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Status and Configuration Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
                 
                 {/* 1. Escolha da AÇÃO DO DIA */}
@@ -3382,7 +3306,6 @@ export default function AdminPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    {/* Botão COMPRAR */}
                     <button
                       type="button"
                       onClick={() => handleSaveDailyConfig('buy')}
@@ -3403,7 +3326,6 @@ export default function AdminPage() {
                       </span>
                     </button>
 
-                    {/* Botão VENDER */}
                     <button
                       type="button"
                       onClick={() => handleSaveDailyConfig('sell')}
@@ -3425,7 +3347,6 @@ export default function AdminPage() {
                     </button>
                   </div>
 
-                  {/* Force Open Toggle (Modo Teste) */}
                   <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
                     <div>
                       <span className="text-xs font-bold text-slate-200 block">Forçar Janela Aberta (Modo Teste do Admin)</span>
@@ -3447,7 +3368,7 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* 2. Regras e Estatísticas de Coletas Hoje */}
+                {/* 2. Regras e Estatísticas */}
                 <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -3475,17 +3396,16 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Fórmula Explicativa */}
                   <div className="p-3 bg-blue-950/40 border border-blue-800/40 rounded-xl text-[11px] text-blue-200 space-y-1">
                     <p className="font-bold flex items-center gap-1.5 text-blue-300">
                       <Activity className="w-3.5 h-3.5" />
-                      Fórmula de Recompensa Crescente:
+                      Regra Matemática Institucional:
                     </p>
                     <code className="block bg-slate-900/80 px-2 py-1 rounded text-[10px] text-amber-300 font-mono">
-                      incremento = 50 + Math.floor((saldoAtual - 1000)/20) + random(5, 15)
+                      Lucro da Ordem = Saldo Atual × 0.0473 (+4.73% fixo ao dia)
                     </code>
                     <p className="text-slate-400 text-[10px] leading-tight">
-                      Garante que investidores com maior saldo ganham recompensas crescentes proporcionais, e o saldo só sobe.
+                      Garante rentabilidade proporcional idêntica a todos os investidores participantes.
                     </p>
                   </div>
                 </div>
@@ -3560,11 +3480,10 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA 4: MERCADO & HORÁRIOS DE TRADING */}
+        {/* ABA 5: MERCADO & HORÁRIOS DE TRADING */}
         {/* ======================================================== */}
         {activeTab === 'mercado' && (
           <div className="space-y-6">
-            {/* Market Schedule Configuration Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center space-x-2">
@@ -3590,7 +3509,6 @@ export default function AdminPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Schedule Label */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                     Descrição do Horário Oficial
@@ -3605,7 +3523,6 @@ export default function AdminPage() {
                   <p className="text-[10px] text-slate-500 mt-1">Exibido no aviso de &quot;Mercado Fechado - Abre às...&quot;</p>
                 </div>
 
-                {/* Open Hour */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                     Hora de Encerramento Noturno
@@ -3621,7 +3538,6 @@ export default function AdminPage() {
                   <p className="text-[10px] text-slate-500 mt-1">Hora limite (ex: 21 para 21:00)</p>
                 </div>
 
-                {/* Global Toggle */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                     Interruptor Geral de Negociação
@@ -3663,7 +3579,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Commodities List & Pause/Resume Table */}
+            {/* Tabela de Commodities */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
               <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                 <div>
@@ -3743,15 +3659,13 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ======================================================== */}
-        {/* ABA: EMITIR COMUNICADO GERAL (GRUPO DE CHAT & TERMINAL) */}
+        {/* ABA 6: EMITIR COMUNICADO GERAL (GRUPO DE CHAT & TERMINAL) */}
         {/* ======================================================== */}
         {activeTab === 'comunicados' && (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
 
-              {/* Header do Card */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1e293b] pb-5">
                 <div className="flex items-center space-x-3.5">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 via-yellow-500 to-amber-600 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0 font-black">
@@ -3781,9 +3695,7 @@ export default function AdminPage() {
                 </Link>
               </div>
 
-              {/* Form de Criação do Comunicado */}
               <div className="grid grid-cols-1 gap-5">
-                {/* Título do Comunicado */}
                 <div>
                   <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
                     <span>Título do Comunicado Oficial</span>
@@ -3801,7 +3713,6 @@ export default function AdminPage() {
                   </p>
                 </div>
 
-                {/* Mensagem do Comunicado */}
                 <div>
                   <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
                     <span>Texto Completo do Comunicado</span>
@@ -3819,7 +3730,6 @@ export default function AdminPage() {
                   </p>
                 </div>
 
-                {/* Nível de Alerta */}
                 <div>
                   <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
                     Estilo / Nível Institucional do Comunicado
@@ -3848,7 +3758,6 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* Opções de Transmissão */}
                 <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-3">
                   <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
                     Canais de Divulgação e Fixação
@@ -3909,14 +3818,12 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Aba de Pré-Visualização em Tempo Real */}
+              {/* Pré-visualização do Comunicado */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                      Pré-visualização do Comunicado
-                    </span>
-                  </div>
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Pré-visualização do Comunicado
+                  </span>
 
                   <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                     <button
@@ -3944,7 +3851,6 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* Preview 1: Como aparece no GRUPO DE CHAT */}
                 {announcementPreviewTab === 'group' && (
                   <div className="p-4 sm:p-6 bg-slate-950 rounded-2xl border border-slate-800">
                     <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 flex items-center justify-between">
@@ -3952,7 +3858,6 @@ export default function AdminPage() {
                       <span className="text-emerald-400 font-bold">100% Organizado &amp; Profissional</span>
                     </div>
 
-                    {/* O Card do Comunicado Idêntico ao Chat */}
                     {(() => {
                       const aType = announcement.type || 'info';
                       const pTheme = {
@@ -4011,7 +3916,6 @@ export default function AdminPage() {
                         <div className={`rounded-3xl bg-gradient-to-br ${pTheme.wrapper} border-2 shadow-2xl p-4 sm:p-6 relative overflow-hidden`}>
                           <div className={`absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r ${pTheme.topBorder}`} />
 
-                          {/* Cabeçalho */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
                             <div className="flex items-center space-x-3">
                               <div className={`w-11 h-11 rounded-2xl ${pTheme.iconBg} border flex items-center justify-center shrink-0 shadow-lg`}>
@@ -4039,7 +3943,6 @@ export default function AdminPage() {
                             </span>
                           </div>
 
-                          {/* Título */}
                           <div className="pt-4 pb-2">
                             <div className="flex items-center gap-2 text-xs text-amber-300 font-bold uppercase tracking-wider mb-1">
                               <Megaphone className="w-3.5 h-3.5 text-amber-400" />
@@ -4050,12 +3953,10 @@ export default function AdminPage() {
                             </h3>
                           </div>
 
-                          {/* Mensagem */}
                           <div className={`mt-2 p-4 rounded-2xl ${pTheme.bodyBg} border leading-relaxed text-xs sm:text-sm whitespace-pre-wrap font-sans select-text shadow-inner`}>
                             {announcement.message || 'Digite a mensagem acima para ver a pré-visualização completa em tempo real...'}
                           </div>
 
-                          {/* Rodapé e reações */}
                           <div className="mt-4 pt-3 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-slate-400">
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -4079,7 +3980,6 @@ export default function AdminPage() {
                   </div>
                 )}
 
-                {/* Preview 2: Como aparece no TERMINAL */}
                 {announcementPreviewTab === 'banner' && (
                   <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
                     <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">
@@ -4106,7 +4006,6 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* Botão de Envio Principal */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#1e293b]">
                 <div className="text-xs text-slate-400 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -4141,16 +4040,13 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA: GESTÃO DA DICA DO INSTRUTOR (admin_config/instructor_tip) */}
-        {/* ======================================================== */}
-        {/* ABA: GESTÃO DA DICA DO INSTRUTOR - CONTROLE CENTRAL */}
+        {/* ABA 7: GESTÃO DA DICA DO INSTRUTOR */}
         {/* ======================================================== */}
         {activeTab === 'dica-instrutor' && (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="bg-[#111a2e] border border-[#1e293b] rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
-              {/* Header do Card */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1e293b] pb-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-lg shadow-blue-600/20 shrink-0">
@@ -4174,7 +4070,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Presets Rápidos de Dicas */}
+              {/* Modelos Rápidos */}
               <div className="space-y-2">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                   Modelos Rápidos (Preencher com 1 Clique)
@@ -4239,7 +4135,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Form de Edição */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
@@ -4274,7 +4169,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Textarea para digitar a Dica do Instrutor */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                   Conteúdo da Dica do Instrutor
@@ -4291,7 +4185,6 @@ export default function AdminPage() {
                 ></textarea>
               </div>
 
-              {/* Prévia ao Vivo */}
               <div className="pt-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
                   Prévia em Tempo Real (Como é exibida no painel dos Investidores)
@@ -4319,7 +4212,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Botão: Salvar e Publicar em Tempo Real */}
               <div className="flex justify-end pt-3 border-t border-[#1e293b]">
                 <button
                   type="button"
@@ -4345,12 +4237,10 @@ export default function AdminPage() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA 6: CHAT GLOBAL DO GRUPO (GESTÃO, AVISOS E MODERAÇÃO) */}
+        {/* ABA 8: CHAT GLOBAL DO GRUPO (GESTÃO, AVISOS E MODERAÇÃO) */}
         {/* ======================================================== */}
         {activeTab === 'chat' && (
           <div className="space-y-6">
-            
-            {/* Header com Atalho para o Chat Ao Vivo */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -4378,10 +4268,7 @@ export default function AdminPage() {
               </Link>
             </div>
 
-            {/* Grid: Enviar Aviso no Chat + Mensagem Fixada */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
-              {/* Card 1: Formulário de Envio de Aviso no Chat */}
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <h3 className="text-sm font-black text-white flex items-center gap-2">
@@ -4419,7 +4306,6 @@ export default function AdminPage() {
                     </span>
                   </label>
 
-                  {/* Prévia do Destaque Amarelo */}
                   <div className="pt-2">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                       Prévia do Destaque (Como os Investidores Verão)
@@ -4449,7 +4335,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Card 2: Gestão da Mensagem Fixada no Topo */}
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <h3 className="text-sm font-black text-white flex items-center gap-2">
@@ -4513,7 +4398,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Card 3: Histórico e Moderação de Mensagens do Chat */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div>
@@ -4602,7 +4486,7 @@ export default function AdminPage() {
 
       </main>
 
-      {/* Modal profissional TapRise para exclusão de mensagem no chat */}
+      {/* Modal TapRise para exclusão de mensagem no chat */}
       <TapRiseModal
         isOpen={Boolean(chatMsgToDelete)}
         title="Remover Mensagem do Chat"

@@ -1,10 +1,12 @@
 /**
  * Utilitários de Horário Oficial de Moçambique (África/Maputo, UTC+2)
  * e motor financeiro da Janela 21h da TapRise (Bolsa e Mercadorias).
+ *
+ * Imune a alterações de data/hora no relógio do computador ou celular do usuário.
  */
 
 export interface MaputoTimeDetails {
-  dateStr: string; // YYYY-MM-DD
+  dateStr: string; // YYYY-MM-DD oficial em Maputo
   hour: number;
   minute: number;
   second: number;
@@ -28,34 +30,120 @@ const DIAS_SEMANA_MAPUTO = [
   'Sábado'
 ];
 
+// Offset oficial do tempo do servidor em relação a Date.now() local (em milissegundos)
+let serverTimeOffsetMs = 0;
+let hasSyncedServerTime = false;
+let isSyncingServerTime = false;
+
 /**
- * Retorna a data atual oficial no fuso horário de Moçambique (YYYY-MM-DD).
+ * Sincroniza o relógio da aplicação com a hora oficial do servidor (Google / UTC),
+ * tornando todo o sistema imune a alterações manuais de data/hora no celular ou computador.
+ */
+export async function syncServerTime(): Promise<number> {
+  if (isSyncingServerTime) return serverTimeOffsetMs;
+  isSyncingServerTime = true;
+  const t0 = Date.now();
+
+  // 1. Tentar ler o cabeçalho 'date' oficial retornado pelo próprio backend / servidor
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const res = await fetch(`${origin}/?_ts=${t0}`, {
+      method: 'HEAD',
+      cache: 'no-store'
+    });
+    const t1 = Date.now();
+    const roundTrip = Math.max(0, (t1 - t0) / 2);
+    const dateHeader = res.headers.get('date');
+    if (dateHeader) {
+      const serverDateMs = new Date(dateHeader).getTime();
+      if (!isNaN(serverDateMs) && serverDateMs > 0) {
+        serverTimeOffsetMs = (serverDateMs + roundTrip) - t1;
+        hasSyncedServerTime = true;
+        isSyncingServerTime = false;
+        return serverTimeOffsetMs;
+      }
+    }
+  } catch {}
+
+  // 2. Fallback primário: timeapi.io
+  try {
+    const res = await fetch('https://timeapi.io/api/time/current/zone?timeZone=UTC', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const serverDateMs = new Date(data.dateTime + 'Z').getTime();
+      if (!isNaN(serverDateMs) && serverDateMs > 0) {
+        serverTimeOffsetMs = serverDateMs - Date.now();
+        hasSyncedServerTime = true;
+        isSyncingServerTime = false;
+        return serverTimeOffsetMs;
+      }
+    }
+  } catch {}
+
+  // 3. Fallback secundário: worldtimeapi.org
+  try {
+    const res = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const serverDateMs = new Date(data.utc_datetime).getTime();
+      if (!isNaN(serverDateMs) && serverDateMs > 0) {
+        serverTimeOffsetMs = serverDateMs - Date.now();
+        hasSyncedServerTime = true;
+        isSyncingServerTime = false;
+        return serverTimeOffsetMs;
+      }
+    }
+  } catch {}
+
+  isSyncingServerTime = false;
+  return serverTimeOffsetMs;
+}
+
+// Inicia a sincronização e revalida a cada 60 segundos
+if (typeof window !== 'undefined') {
+  syncServerTime();
+  setInterval(() => {
+    syncServerTime();
+  }, 60000);
+}
+
+/**
+ * Retorna o Date atual baseado estritamente na hora oficial do servidor
+ * (ignora qualquer alteração fraudulenta do relógio do aparelho).
+ */
+export function getServerNow(): Date {
+  return new Date(Date.now() + serverTimeOffsetMs);
+}
+
+/**
+ * Retorna a data atual oficial no fuso horário de Moçambique (África/Maputo, UTC+2) no padrão YYYY-MM-DD.
  */
 export function getMaputoTodayDate(): string {
+  const now = getServerNow();
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Africa/Maputo',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit'
-    }).formatToParts(new Date());
-
-    const y = parts.find((p) => p.type === 'year')?.value || '2026';
-    const m = parts.find((p) => p.type === 'month')?.value || '10';
-    const d = parts.find((p) => p.type === 'day')?.value || '31';
-    return `${y}-${m}-${d}`;
+    });
+    return formatter.format(now);
   } catch {
-    const d = new Date();
-    return d.toISOString().split('T')[0];
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const catDate = new Date(utcTime + (2 * 3600000));
+    const y = catDate.getFullYear();
+    const m = String(catDate.getMonth() + 1).padStart(2, '0');
+    const d = String(catDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 }
 
 /**
- * Retorna os detalhes de tempo de Maputo (UTC+2) com validação de dia da semana
- * e janela operacional das 21:00 às 21:30.
+ * Retorna os detalhes de tempo de Moçambique (África/Maputo, UTC+2) com validação
+ * de dias úteis e janela operacional das 21:00 às 21:30.
  */
 export function getMaputoTimeDetails(): MaputoTimeDetails {
-  const now = new Date();
+  const now = getServerNow();
   const dateStr = getMaputoTodayDate();
 
   let hour = 0;
@@ -76,13 +164,12 @@ export function getMaputoTimeDetails(): MaputoTimeDetails {
     minute = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10);
     second = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10);
 
-    // Calcular dayOfWeek no fuso de Maputo (UTC+2)
     const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
     const catDate = new Date(utcTime + (2 * 3600000));
     dayOfWeek = catDate.getDay();
   } catch {
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const catDate = new Date(utc + 2 * 3600000);
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const catDate = new Date(utc + (2 * 3600000));
     hour = catDate.getHours();
     minute = catDate.getMinutes();
     second = catDate.getSeconds();
@@ -94,7 +181,7 @@ export function getMaputoTimeDetails(): MaputoTimeDetails {
   const dayName = DIAS_SEMANA_MAPUTO[dayOfWeek] || 'Dia de Negociação';
 
   const timeInHours = hour + minute / 60 + second / 3600;
-  // Janela das 21:00 às 21:30 apenas em dias úteis (Segunda a Sexta)
+  // Janela das 21:00 às 21:30 em dias úteis (Segunda a Sexta)
   const isInWindow = isWeekday && hour === 21 && minute < 30;
 
   let statusMessage = '';
@@ -110,8 +197,7 @@ export function getMaputoTimeDetails(): MaputoTimeDetails {
     const mins = Math.floor((totalSecs % 3600) / 60);
     statusMessage = `Mesa em Standby • Sessão hoje às 21:00 (em ${hrs}h ${mins}m)`;
   } else {
-    // Passou das 21:30
-    if (dayOfWeek === 5) { // Sexta após 21:30
+    if (dayOfWeek === 5) {
       statusMessage = 'Mercado Fechado para o Fim de Semana • Reabre Segunda às 21:00';
     } else {
       const totalSecs = (24 * 3600 - (hour * 3600 + minute * 60 + second)) + (21 * 3600);
@@ -138,18 +224,17 @@ export function getMaputoTimeDetails(): MaputoTimeDetails {
 }
 
 /**
- * REGRA FIXA OFICIAL DA JANELA 21H TAPRISE:
- * Taxa fixa = 4.73% (0.0473)
+ * REGRAS OFICIAIS DA JANELA 21H TAPRISE:
+ * Taxa de Lucro Fixa = 4.73% (0.0473)
  * Custo de Margem por Ordem = 100,00 MT
  *
- * Se Ganhou:
- *   - 100,00 MT estornado integralmente
- *   - + ganho_do_dia = saldo_atual * 0.0473
- *   - novo_saldo = saldo_atual + ganho_do_dia
+ * Vitória:
+ *   - Ganho = saldo_atual * 0.0473
+ *   - Novo saldo = saldo_atual + Ganho
  *
- * Se Perdeu:
- *   - perde 100,00 MT
- *   - novo_saldo = Math.max(0, saldo_atual - 100)
+ * Derrota / Fora de Horário / Já Operou / Direção Incorreta:
+ *   - Perda = 100,00 MT
+ *   - Novo saldo = Math.max(0, saldo_atual - 100)
  */
 export const TAXA_FIXA_21H = 0.0473; // 4.73%
 export const VALOR_ORDEM_MARGEM = 100; // 100,00 MT
@@ -166,7 +251,7 @@ export interface OrderExecutionEvaluation {
 }
 
 /**
- * Avalia o resultado da ordem de compra ou venda.
+ * Avalia o resultado da ordem da Janela 21h.
  */
 export function evaluate21hOrder(params: {
   currentBalance: number;
@@ -177,7 +262,6 @@ export function evaluate21hOrder(params: {
 }): OrderExecutionEvaluation {
   const { currentBalance, userAction, adminAction, forceOpen, alreadyClaimedToday } = params;
   const time = getMaputoTimeDetails();
-
   const safeBalance = Math.max(0, Number(currentBalance) || 0);
 
   // 1. Saldo insuficiente (mínimo 100 MT)
@@ -208,10 +292,10 @@ export function evaluate21hOrder(params: {
     };
   }
 
-  // Validação da Janela de Horário (21:00 - 21:30)
+  // Validação da Janela de Horário Oficial (21:00 às 21:30)
   const isTimeValid = time.isInWindow || !!forceOpen;
 
-  // 3. Fora do horário das 21h -> PERDE 100 MT
+  // 3. Fora do horário das 21h (antes das 21:00 ou após 21:30) -> PERDE 100 MT
   if (!isTimeValid) {
     const newBal = Math.max(0, Number((safeBalance - VALOR_ORDEM_MARGEM).toFixed(2)));
     return {
@@ -226,7 +310,7 @@ export function evaluate21hOrder(params: {
     };
   }
 
-  // 4. Já operou com vitória hoje -> PERDE 100 MT
+  // 4. Já operou com vitória hoje (apenas 1 ganho por dia útil) -> PERDE 100 MT
   if (alreadyClaimedToday) {
     const newBal = Math.max(0, Number((safeBalance - VALOR_ORDEM_MARGEM).toFixed(2)));
     return {
@@ -237,11 +321,11 @@ export function evaluate21hOrder(params: {
       oldBalance: safeBalance,
       newBalance: newBal,
       reasonCode: 'ALREADY_CLAIMED',
-      reasonText: 'Stop Loss Acionado: Limite diário atingido. É permitida apenas 1 ordem institucional por dia útil. Perda de margem de 100,00 MT.'
+      reasonText: 'Stop Loss Acionado: Limite diário atingido. É permitida apenas 1 ordem institucional com ganho por dia útil. Perda de margem de 100,00 MT.'
     };
   }
 
-  // 5. Direção errada em relação ao Admin (Alta requer COMPRAR, Baixa requer VENDER)
+  // 5. Direção errada em relação à diretriz definida pelo Admin (Admin = Compra -> requer Compra; Admin = Venda -> requer Venda)
   const isCorrectDirection = userAction === adminAction;
   if (!isCorrectDirection) {
     const newBal = Math.max(0, Number((safeBalance - VALOR_ORDEM_MARGEM).toFixed(2)));
@@ -257,8 +341,7 @@ export function evaluate21hOrder(params: {
     };
   }
 
-  // 6. VITÓRIA / GANHO!
-  // Ganho = saldo_atual * 0.0473 (4.73% fixo)
+  // 6. VITÓRIA / LUCRO OFICIAL (+4.73% do saldo)
   const gain = Number((safeBalance * TAXA_FIXA_21H).toFixed(2));
   const newBal = Number((safeBalance + gain).toFixed(2));
 
@@ -275,7 +358,7 @@ export function evaluate21hOrder(params: {
 }
 
 /**
- * Cálculo de incremento oficial de 4.73% sobre o saldo
+ * Cálculo oficial do incremento de 4.73%
  */
 export function calculate21hIncrement(currentBalance: number): { increment: number; newBalance: number } {
   const safeBalance = Math.max(0, Number(currentBalance) || 0);
@@ -293,7 +376,7 @@ export interface WithdrawalWindowDetails {
 
 /**
  * Regra Oficial de Levantamentos TapRise:
- * Os levantamentos processam-se exclusivamente entre as 08:00 e as 12:00 todos os dias (Hora de Moçambique Maputo, CAT, UTC+2).
+ * Exclusivamente entre as 08:00 e as 12:00 todos os dias (Hora de Moçambique Maputo, CAT, UTC+2).
  */
 export function getMaputoWithdrawalWindowDetails(): WithdrawalWindowDetails {
   const { hour, minute, second } = getMaputoTimeDetails();

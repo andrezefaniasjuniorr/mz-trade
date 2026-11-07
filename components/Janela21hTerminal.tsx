@@ -24,6 +24,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import TapRiseModal from '@/components/TapRiseModal';
+import { COMMODITY_SPECS, getLiveQuote, getDeterministicCandles } from '@/lib/globalMarketEngine';
 
 interface CandleData {
   time: string;
@@ -35,7 +36,6 @@ interface CandleData {
 
 type Timeframe = 'M1' | 'M5' | 'M15' | 'H1';
 
-// Gerador determinístico backward sem salto final (evita erro de hidratação SSR)
 function createSeedCandles(tf: Timeframe, basePrice = 1482.50): CandleData[] {
   const counts: Record<Timeframe, { count: number; intervalMins: number; vol: number }> = {
     M1: { count: 32, intervalMins: 1, vol: 0.8 },
@@ -49,7 +49,6 @@ function createSeedCandles(tf: Timeframe, basePrice = 1482.50): CandleData[] {
   let currentClose = basePrice;
   const now = new Date();
 
-  // Constrói para trás a partir de basePrice: a última vela termina exatamente no preço atual sem salto
   for (let i = 0; i < cfg.count; i++) {
     const wave = Math.sin((i + 1) * 0.45) * 0.5 + Math.cos((i + 1) * 0.3) * 0.5;
     const delta = wave * cfg.vol;
@@ -80,7 +79,6 @@ interface Janela21hTerminalProps {
   onOrderExecuted?: (newBalance: number) => void;
 }
 
-// Armazenamento inicial determinístico por timeframe
 const INITIAL_TERMINAL_CANDLES: Record<Timeframe, CandleData[]> = {
   M1: createSeedCandles('M1'),
   M5: createSeedCandles('M5'),
@@ -93,7 +91,6 @@ const emptySubscribe = () => () => {};
 export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Janela21hTerminalProps) {
   const { user, userProfile, updateBalance } = useAuth();
 
-  // Controle de Montagem puro sem setState em efeito
   const isMounted = useSyncExternalStore(
     emptySubscribe,
     () => true,
@@ -107,9 +104,8 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   // Cotação Ao Vivo
   const [currentPrice, setCurrentPrice] = useState<number>(1482.50);
   const [lastTickDir, setLastTickDir] = useState<'up' | 'down'>('up');
-  const tickCountRef = useRef<number>(0);
 
-  // Armazenamento estável por timeframe para não trocar nem resetar sozinho
+  // Armazenamento estável por timeframe
   const storeRef = useRef<Record<Timeframe, CandleData[]>>({
     M1: [...INITIAL_TERMINAL_CANDLES.M1],
     M5: [...INITIAL_TERMINAL_CANDLES.M5],
@@ -141,7 +137,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
     ticket: ''
   });
 
-  // Modal profissional TapRise para avisos
+  // Modal para avisos de saldo insuficiente ou login
   const [modalNotice, setModalNotice] = useState<{
     isOpen: boolean;
     title: string;
@@ -150,25 +146,21 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   } | null>(null);
 
   // Controle offline/online
-  const [isOffline, setIsOffline] = useState<boolean>(false);
   const isOfflineRef = useRef<boolean>(false);
   const offlineTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleOffline = () => {
-      setIsOffline(true);
       isOfflineRef.current = true;
       offlineTimeRef.current = Date.now();
     };
 
     const handleOnline = () => {
-      setIsOffline(false);
       isOfflineRef.current = false;
       if (offlineTimeRef.current) {
         const elapsedSec = Math.max(1, Math.round((Date.now() - offlineTimeRef.current) / 1000));
         offlineTimeRef.current = null;
 
-        // Ao voltar online, avança o mercado com saldo proporcional ao tempo offline
         const steps = Math.min(30, Math.max(3, Math.floor(elapsedSec / 2)));
         let deltaSum = 0;
         for (let i = 0; i < steps; i++) {
@@ -218,50 +210,35 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
     setCandles([...storeRef.current[newTf]]);
   };
 
-  // Motor de ticks do mercado
+  const bmmSpec = useMemo(() => COMMODITY_SPECS.find((s) => s.id === 'bmm') || COMMODITY_SPECS[0], []);
+
+  // Motor sincronizado com a Hora Oficial de Moçambique e o Motor Global
   useEffect(() => {
     if (!isMounted) return;
 
-    const intervalMs = timeframe === 'M1' ? 750 : timeframe === 'M5' ? 1200 : 1800;
-
-    const tickInterval = setInterval(() => {
-      // Quando offline, o gráfico fica totalmente parado visualmente
+    const syncMarket = () => {
       if (isOfflineRef.current) return;
 
-      setCurrentPrice((prev) => {
-        const step = (Math.random() - 0.49) * (timeframe === 'M1' ? 0.35 : 0.6);
-        const nextPrice = Number((prev + step).toFixed(2));
-        setLastTickDir(nextPrice >= prev ? 'up' : 'down');
+      const quote = getLiveQuote(bmmSpec);
+      setCurrentPrice(quote.price);
+      setLastTickDir(quote.lastTickDir);
 
-        tickCountRef.current += 1;
-        const currentList = storeRef.current[timeframe];
-        const last = currentList[currentList.length - 1];
+      const updatedCandles = getDeterministicCandles(bmmSpec, timeframe, 35);
+      setCandles(
+        updatedCandles.map((c) => ({
+          time: c.time,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close
+        }))
+      );
+    };
 
-        if (tickCountRef.current >= (timeframe === 'M1' ? 20 : 45)) {
-          tickCountRef.current = 0;
-          const now = new Date();
-          const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-          currentList.push({
-            time: timeStr,
-            open: nextPrice,
-            high: nextPrice,
-            low: nextPrice,
-            close: nextPrice
-          });
-          if (currentList.length > 35) currentList.shift();
-        } else if (last) {
-          last.close = nextPrice;
-          last.high = Math.max(last.high, nextPrice);
-          last.low = Math.min(last.low, nextPrice);
-        }
-
-        setCandles([...currentList]);
-        return nextPrice;
-      });
-    }, intervalMs);
-
-    return () => clearInterval(tickInterval);
-  }, [timeframe, isMounted]);
+    syncMarket();
+    const interval = setInterval(syncMarket, 1000);
+    return () => clearInterval(interval);
+  }, [bmmSpec, timeframe, isMounted]);
 
   const rawBalance = (userProfile as any)?.balance ?? (userProfile as any)?.saldoVirtual ?? 0;
   const userBalance = Number(rawBalance);
@@ -269,7 +246,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   const userClaimedToday = (userProfile as any)?.lastClaimDate === todayMaputoStr;
   const isWindowActive = maputoTime.isInWindow || dailyConfig.forceOpen;
 
-  // Execução de Ordem na Bolsa
+  // Execução de Ordem na Bolsa (Janela 21h)
   const handleExecuteOrder = async (action: 'buy' | 'sell') => {
     if (!user) {
       setModalNotice({
@@ -283,47 +260,71 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
 
     if (isProcessingOrder) return;
 
-    if (userClaimedToday) {
+    // 1. Margem mínima necessária para abrir ordem (100 MT)
+    if (userBalance < 100) {
       setModalNotice({
         isOpen: true,
-        title: 'Operação Já Realizada',
-        description: 'Você já concluiu a operação de hoje. Aguarde a próxima janela.',
-        variant: 'info'
-      });
-      return;
-    }
-
-    if (!isWindowActive) {
-      setModalNotice({
-        isOpen: true,
-        title: 'Mercado Fechado',
-        description: 'A janela oficial de negociação abre às 21:00.',
+        title: 'Margem Insuficiente',
+        description: 'É necessária uma margem mínima de 100,00 MT para abrir uma ordem de mercado.',
         variant: 'warning'
       });
       return;
     }
 
-    const orderTicket = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
-    const won = action === dailyConfig.actionType;
-
-    // Cálculo da liquidação matemática
-    let calculatedIncrement = 0;
-    try {
-      const res = calculate21hIncrement(userBalance);
-      calculatedIncrement = res.increment;
-    } catch {
-      calculatedIncrement = Math.round(userBalance * 0.05 * 100) / 100;
+    // 2. Fim de semana (Sábado e Domingo mercado fechado)
+    if (maputoTime.isWeekend && !dailyConfig.forceOpen) {
+      setModalNotice({
+        isOpen: true,
+        title: 'Mercado Fechado',
+        description: 'A Mesa de Operações da Bolsa de Mercadorias funciona de segunda a sexta. As negociações reabrem segunda-feira às 21:00.',
+        variant: 'info'
+      });
+      return;
     }
 
-    const gain = calculatedIncrement;
-    const loss = Math.round(userBalance * 0.1 * 100) / 100;
-    const finalBalance = won ? Number((userBalance + gain).toFixed(2)) : Math.max(0, Number((userBalance - loss).toFixed(2)));
+    // 3. Meio da semana (Segunda a Sexta): SEMPRE OPERA com contagem de 8 segundos!
+    // Avaliação matemática e de regras:
+    // - Antes das 21:00 ou após as 21:30 -> Perde 100 MT
+    // - Já ganhou hoje (userClaimedToday) -> Perde 100 MT
+    // - Dentro das 21:00 às 21:30:
+    //     se ação === adminAction -> Ganha incremento oficial (+4.73% do saldo)
+    //     se ação !== adminAction -> Perde 100 MT
+    const isWithinWindow = maputoTime.isInWindow || dailyConfig.forceOpen;
+    let won = false;
+    let gain = 0;
+    let loss = 0;
+
+    if (!isWithinWindow) {
+      won = false;
+      loss = 100;
+    } else if (userClaimedToday) {
+      won = false;
+      loss = 100;
+    } else if (action === dailyConfig.actionType) {
+      won = true;
+      try {
+        const res = calculate21hIncrement(userBalance);
+        gain = res.increment;
+      } catch {
+        gain = Math.round(userBalance * 0.0473 * 100) / 100;
+      }
+    } else {
+      won = false;
+      loss = 100;
+    }
+
+    const finalBalance = won
+      ? Number((userBalance + gain).toFixed(2))
+      : Math.max(0, Number((userBalance - loss).toFixed(2)));
+
+    const orderTicket = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
 
     try {
       setIsProcessingOrder(true);
       setProcessingSide(action);
       setProcessingCountdown(8);
 
+      // Contagem regressiva obrigatória de 8 segundos estilo MT5
       for (let sec = 8; sec > 0; sec--) {
         setProcessingCountdown(sec);
         await new Promise((r) => setTimeout(r, 1000));
@@ -369,6 +370,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
         onOrderExecuted(finalBalance);
       }
 
+      // Exibe diretamente o card Ordem Encerrada com o resultado exato
       setOrderModalResult({
         open: true,
         won,
@@ -436,7 +438,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
   return (
     <div className="bg-[#0b1220] rounded-2xl p-4 sm:p-5 text-white border border-slate-800 shadow-xl relative overflow-hidden">
       
-      {/* 1. TOPO: PARÂMETROS FOREX (SEM MOEDA NO GRÁFICO) */}
+      {/* 1. TOPO: PARÂMETROS FOREX */}
       <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 gap-3">
         <div className="flex items-center space-x-3">
           <div>
@@ -565,7 +567,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
               </linearGradient>
             </defs>
 
-            {/* GRADE PROFISSIONAL */}
+            {/* GRADE */}
             <g opacity="0.35">
               <line x1="0" y1={chartHeight * 0.2} x2={chartWidth} y2={chartHeight * 0.2} stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" />
               <line x1="0" y1={chartHeight * 0.4} x2={chartWidth} y2={chartHeight * 0.4} stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" />
@@ -686,7 +688,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
         </div>
       )}
 
-      {/* 4. MODAL DE RESULTADO */}
+      {/* 4. MODAL DE RESULTADO: ORDEM ENCERRADA / CONCLUÍDA */}
       {orderModalResult.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6 max-w-sm w-full relative shadow-2xl space-y-4">
@@ -764,7 +766,7 @@ export default function Janela21hTerminal({ dailyConfig, onOrderExecuted }: Jane
         </div>
       )}
 
-      {/* Modal profissional TapRise para avisos da janela 21 */}
+      {/* Modal TapRise apenas para avisos críticos (Margem Insuficiente ou Fim de Semana) */}
       <TapRiseModal
         isOpen={Boolean(modalNotice?.isOpen)}
         title={modalNotice?.title || 'Aviso'}

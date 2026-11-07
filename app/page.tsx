@@ -65,6 +65,13 @@ import {
 import { WalletBalanceChart } from '@/components/WalletBalanceChart';
 import Janela21hTerminal from '@/components/Janela21hTerminal';
 import {
+  COMMODITY_SPECS,
+  getGlobalMarketQuotes,
+  subscribeToGlobalMarket,
+  getDeterministicCandles,
+  LiveMarketQuote
+} from '@/lib/globalMarketEngine';
+import {
   collection,
   doc,
   getDoc,
@@ -381,128 +388,19 @@ interface AssetSeed {
   volatilityMult: number;
 }
 
-function getAssetSeed(id: string, symbol: string = ''): AssetSeed {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const combined = `${id}_${symbol}_${todayStr}`;
-  let hash = 2166136261;
-  for (let i = 0; i < combined.length; i++) {
-    hash ^= combined.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  const abs = Math.abs(hash);
-
-  const freqTable = [0.22, 0.35, 0.18, 0.44, 0.28, 0.52, 0.15];
-  const secFreqTable = [0.08, 0.14, 0.21, 0.11, 0.17, 0.09, 0.25];
-  const driftTable = [0.0018, -0.0016, 0.0022, -0.0024, 0.0008, -0.0011, 0.0014];
-
-  return {
-    primaryFreq: freqTable[abs % freqTable.length],
-    secondaryFreq: secFreqTable[(abs >> 2) % secFreqTable.length],
-    primaryAmp: 0.65 + ((abs % 40) / 100),
-    secondaryAmp: 0.35 + (((abs >> 3) % 30) / 100),
-    drift: driftTable[abs % driftTable.length],
-    volatilityMult: 0.85 + ((abs % 45) / 100)
-  };
-}
-
-const persistentCandleStore: Record<string, ChartCandle[]> = {};
-
-function getOrCreateCandles(commodity: Commodity, timeframe: string): ChartCandle[] {
-  const normTf = (timeframe || '5M').toUpperCase();
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const key = `${commodity.id}_${normTf}_${todayStr}`;
-
-  const tfConfig: Record<string, { count: number; intervalMins: number; volMult: number }> = {
-    '1M': { count: 42, intervalMins: 1, volMult: 0.006 },
-    '5M': { count: 36, intervalMins: 5, volMult: 0.014 },
-    '15M': { count: 30, intervalMins: 15, volMult: 0.024 },
-    '1H': { count: 24, intervalMins: 60, volMult: 0.042 },
-    '1D': { count: 20, intervalMins: 1440, volMult: 0.080 }
+function getOrCreateCandles(commodity: Commodity | LiveMarketQuote, timeframe: string): ChartCandle[] {
+  const spec = COMMODITY_SPECS.find((s) => s.id === commodity.id) || {
+    id: commodity.id,
+    name: commodity.name,
+    symbol: commodity.symbol,
+    category: commodity.category,
+    basePrice: commodity.price || 100,
+    unit: commodity.unit || 'MT',
+    baseVolatility: commodity.baseVolatility || 0.015,
+    description: ''
   };
 
-  const cfg = tfConfig[normTf] || tfConfig['5M'];
-  const intervalMs = cfg.intervalMins * 60000;
-  const now = Date.now();
-
-  if (persistentCandleStore[key] && persistentCandleStore[key].length > 0) {
-    const list = persistentCandleStore[key];
-    const last = list[list.length - 1];
-
-    if (now - last.timestamp >= intervalMs) {
-      const candleTime = new Date(now);
-      const timeStr = normTf === '1D'
-        ? `${candleTime.getDate()}/${candleTime.getMonth() + 1}`
-        : `${String(candleTime.getHours()).padStart(2, '0')}:${String(candleTime.getMinutes()).padStart(2, '0')}`;
-
-      const newCandle: ChartCandle = {
-        time: timeStr,
-        open: last.close,
-        high: Math.max(last.close, commodity.price),
-        low: Math.min(last.close, commodity.price),
-        close: commodity.price,
-        volume: Math.floor(22000 + ((list.length * 5129) % 40000)),
-        timestamp: now
-      };
-
-      list.push(newCandle);
-      if (list.length > cfg.count + 8) {
-        list.shift();
-      }
-    } else {
-      last.close = commodity.price;
-      last.high = Math.max(last.high, commodity.price);
-      last.low = Math.min(last.low, commodity.price);
-    }
-    return [...list];
-  }
-
-  // GERAÇÃO REALISTA RETROATIVA A PARTIR DO PREÇO ATUAL (SEM SALTO FINAL IRREAL)
-  const seed = getAssetSeed(commodity.id, commodity.symbol);
-  const list: ChartCandle[] = [];
-  const basePrice = commodity.price || 100;
-  const unitVolatility = basePrice * (commodity.baseVolatility || 0.014) * (cfg.volMult / 0.014) * seed.volatilityMult;
-  const precision = commodity.price < 100 ? 3 : 2;
-
-  let currentClose = basePrice;
-
-  // Constrói de trás para a frente a partir do preço exato atual:
-  // A vela na posição [count - 1] (atual) tem fecho exatamente igual ao preço atual
-  for (let i = 0; i < cfg.count; i++) {
-    const wave1 = Math.sin((i + 1) * seed.primaryFreq) * seed.primaryAmp;
-    const wave2 = Math.cos((i + 1) * seed.secondaryFreq) * seed.secondaryAmp;
-    const stepNoise = Math.sin((i + 1) * 7919 + seed.primaryFreq * 1000) * 0.45;
-    const delta = (wave1 + wave2 + stepNoise - seed.drift) * unitVolatility * 0.45;
-
-    const open = Math.max(0.001, Number((currentClose - delta).toFixed(precision)));
-    const close = Math.max(0.001, Number(currentClose.toFixed(precision)));
-    const wickHigh = Math.abs(Math.sin((i + 1) * 3571)) * unitVolatility * 0.4;
-    const wickLow = Math.abs(Math.cos((i + 1) * 4861)) * unitVolatility * 0.4;
-    const high = Number((Math.max(open, close) + wickHigh).toFixed(precision));
-    const low = Number((Math.max(0.001, Math.min(open, close) - wickLow)).toFixed(precision));
-
-    const candleTimestamp = now - i * intervalMs;
-    const candleTime = new Date(candleTimestamp);
-    const timeStr = normTf === '1D'
-      ? `${candleTime.getDate()}/${candleTime.getMonth() + 1}`
-      : `${String(candleTime.getHours()).padStart(2, '0')}:${String(candleTime.getMinutes()).padStart(2, '0')}`;
-
-    const vol = Math.floor(15000 + (Math.abs(Math.sin(i * 123.45)) * 45000));
-
-    list.unshift({
-      time: timeStr,
-      open,
-      high,
-      low,
-      close,
-      volume: vol,
-      timestamp: candleTimestamp
-    });
-
-    currentClose = open;
-  }
-
-  persistentCandleStore[key] = list;
-  return [...list];
+  return getDeterministicCandles(spec, timeframe, 36);
 }
 
 // ==========================================
@@ -986,7 +884,9 @@ export default function Home() {
 
   // Fullscreen MT5 modal asset state for Mercados
   const [fullscreenAssetId, setFullscreenAssetId] = useState<string | null>(null);
-  const [commodities, setCommodities] = useState<Commodity[]>(INITIAL_COMMODITIES);
+  const [commodities, setCommodities] = useState<LiveMarketQuote[]>(() =>
+    getGlobalMarketQuotes().filter((c) => c.id !== 'bmm')
+  );
   const fullscreenAsset = useMemo(
     () => commodities.find((c) => c.id === fullscreenAssetId) || null,
     [commodities, fullscreenAssetId]
@@ -1423,137 +1323,12 @@ export default function Home() {
     router.push('/login');
   };
 
-  // Motor com Momentum e Ondas Distintas por Ativo (Variações Notáveis e Proporcionais)
-  const assetMomentumRef = useRef<Record<string, { momentum: number; stepsLeft: number }>>({});
-  const isMarketOfflineRef = useRef<boolean>(false);
-  const marketOfflineTimeRef = useRef<number | null>(null);
-
+  // Sincronização contínua com o Motor Global de Mercado (nunca reinicia, sincronizado para todas as contas)
   useEffect(() => {
-    const handleOffline = () => {
-      isMarketOfflineRef.current = true;
-      marketOfflineTimeRef.current = Date.now();
-    };
-
-    const handleOnline = () => {
-      isMarketOfflineRef.current = false;
-      if (marketOfflineTimeRef.current) {
-        const elapsedSec = Math.max(1, Math.round((Date.now() - marketOfflineTimeRef.current) / 1000));
-        marketOfflineTimeRef.current = null;
-
-        // Ao voltar online, avança todos os mercados calculando o movimento acumulado offline
-        const steps = Math.min(25, Math.max(3, Math.floor(elapsedSec / 2)));
-        const todayStr = new Date().toISOString().slice(0, 10);
-
-        setCommodities((prevCommodities) =>
-          prevCommodities.map((item) => {
-            const seed = getAssetSeed(item.id, item.symbol);
-            let accumulatedPercent = 0;
-            for (let s = 0; s < steps; s++) {
-              accumulatedPercent += (Math.random() - 0.495) * (item.baseVolatility * 0.9);
-            }
-            accumulatedPercent += seed.drift * steps * 0.35;
-
-            const newPrice = Math.max(0.01, Number((item.price * (1 + accumulatedPercent)).toFixed(item.price < 100 ? 3 : 2)));
-            const baseOpen = item.open || (item.price * 0.98);
-            const calcChange24h = Number((((newPrice - baseOpen) / baseOpen) * 100).toFixed(2));
-
-            // Atualiza velas com vela de salto após retorno de conexão
-            const timeframes = ['1M', '5M', '15M', '1H', '1D'];
-            timeframes.forEach((tf) => {
-              const k = `${item.id}_${tf}_${todayStr}`;
-              if (persistentCandleStore[k] && persistentCandleStore[k].length > 0) {
-                const list = persistentCandleStore[k];
-                const now = new Date();
-                const timeStr = tf === '1D'
-                  ? `${now.getDate()}/${now.getMonth() + 1}`
-                  : `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-                list.push({
-                  time: timeStr,
-                  open: item.price,
-                  high: Math.max(item.price, newPrice) + item.baseVolatility * 0.3,
-                  low: Math.min(item.price, newPrice) - item.baseVolatility * 0.3,
-                  close: newPrice,
-                  volume: Math.floor(22000 + Math.random() * 35000),
-                  timestamp: Date.now()
-                });
-                if (list.length > 50) list.shift();
-              }
-            });
-
-            return {
-              ...item,
-              price: newPrice,
-              change24h: calcChange24h,
-              high: Math.max(item.high, newPrice),
-              low: Math.min(item.low, newPrice)
-            };
-          })
-        );
-      }
-    };
-
-    window.addEventListener('offline', handleOffline);
-    window.addEventListener('online', handleOnline);
-
-    const interval = setInterval(() => {
-      // Quando offline, o mercado e os gráficos ficam totalmente parados visualmente
-      if (isMarketOfflineRef.current) return;
-
-      const todayStr = new Date().toISOString().slice(0, 10);
-
-      setCommodities((prevCommodities) =>
-        prevCommodities.map((item) => {
-          if (!assetMomentumRef.current[item.id] || assetMomentumRef.current[item.id].stepsLeft <= 0) {
-            const seed = getAssetSeed(item.id, item.symbol);
-            const isBullTrend = Math.random() < (seed.drift > 0 ? 0.58 : 0.42);
-            const direction = isBullTrend ? 1 : -1;
-            const strength = (0.003 + Math.random() * 0.008) * (item.baseVolatility / 0.012);
-            assetMomentumRef.current[item.id] = {
-              momentum: direction * strength,
-              stepsLeft: Math.floor(3 + Math.random() * 5)
-            };
-          }
-
-          const currentWave = assetMomentumRef.current[item.id];
-          currentWave.stepsLeft -= 1;
-
-          const jitter = (Math.random() - 0.495) * (item.baseVolatility * 0.6);
-          const percentDelta = currentWave.momentum + jitter;
-
-          const newPrice = Math.max(0.01, Number((item.price * (1 + percentDelta)).toFixed(item.price < 100 ? 3 : 2)));
-          
-          const baseOpen = item.open || (item.price * 0.98);
-          const calcChange24h = Number((((newPrice - baseOpen) / baseOpen) * 100).toFixed(2));
-
-          // Atualizar vela atual no repositório persistente de gráficos
-          const timeframes = ['1M', '5M', '15M', '1H', '1D'];
-          timeframes.forEach((tf) => {
-            const k = `${item.id}_${tf}_${todayStr}`;
-            if (persistentCandleStore[k] && persistentCandleStore[k].length > 0) {
-              const lastCandle = persistentCandleStore[k][persistentCandleStore[k].length - 1];
-              lastCandle.close = newPrice;
-              lastCandle.high = Math.max(lastCandle.high, newPrice);
-              lastCandle.low = Math.min(lastCandle.low, newPrice);
-            }
-          });
-
-          return {
-            ...item,
-            price: newPrice,
-            change24h: calcChange24h,
-            high: Math.max(item.high, newPrice),
-            low: Math.min(item.low, newPrice)
-          };
-        })
-      );
-    }, 1250);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('online', handleOnline);
-    };
+    const unsub = subscribeToGlobalMarket((quotes) => {
+      setCommodities(quotes.filter((q) => q.id !== 'bmm'));
+    });
+    return unsub;
   }, []);
 
   const unrealizedPnL = useMemo(() => {
