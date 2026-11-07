@@ -1072,6 +1072,13 @@ export default function Home() {
 
 
 
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3500);
+  }, []);
+
   // Background Chat Messages Listener with Audio Chime & Push Notification
   useEffect(() => {
     let isInitialMount = true;
@@ -1097,7 +1104,7 @@ export default function Home() {
           if (d.uid !== user?.uid) {
             playMessageSound();
             const senderName = d.displayName || 'Investidor TapRise';
-            const bodyText = d.type === 'image' ? '📷 Enviou uma foto' : (d.text || 'Nova mensagem no chat');
+            const bodyText = d.type === 'image' ? '📷 Enviou uma foto' : (d.type === 'audio' || d.tipo === 'audio' ? '🎤 Enviou uma nota de voz' : (d.text || 'Nova mensagem no chat'));
             triggerPushNotification(`TapRise Chat • ${senderName}`, bodyText, '/chat');
             showToast(`💬 ${senderName}: ${bodyText}`, 'info');
           }
@@ -1107,7 +1114,7 @@ export default function Home() {
     );
 
     return () => unsub();
-  }, [user?.uid]);
+  }, [user?.uid, showToast]);
 
   const selectedAsset = useMemo(() => {
     return commodities.find((c) => c.id === selectedAssetId) || commodities[0];
@@ -1124,13 +1131,6 @@ export default function Home() {
   const [marketCategory, setMarketCategory] = useState<string>('Todos');
   const [selectedChartType, setSelectedChartType] = useState<'candle' | 'line'>('candle');
   const [selectedTimeframe, setSelectedTimeframe] = useState<'1M' | '5M' | '15M' | '1H' | '1D'>('5M');
-
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 3500);
-  }, []);
 
   const [dailyConfig, setDailyConfig] = useState<{
     actionType: 'buy' | 'sell';

@@ -23,7 +23,10 @@ export interface GroupMessage {
     text: string;
   } | null;
   createdAt: any;
-  type?: 'text' | 'system' | 'image' | 'announcement';
+  type?: 'text' | 'system' | 'image' | 'announcement' | 'audio';
+  tipo?: string;
+  audioUrl?: string;
+  duracao?: number;
   announcementTitle?: string;
   announcementType?: 'info' | 'warning' | 'urgent' | 'success';
   pinned?: boolean;
@@ -60,10 +63,13 @@ export interface PrivateMessage {
   senderEmail: string;
   isAdmin: boolean;
   text: string;
-  type: 'text' | 'image' | 'system';
+  type: 'text' | 'image' | 'system' | 'audio';
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  audioUrl?: string;
+  duracao?: number;
+  tipo?: string;
   createdAt: any;
   read: boolean;
   // Transient state for live upload
@@ -339,6 +345,57 @@ export async function uploadImageWithProgress(
   }
 }
 
+/**
+ * Uploads voice audio note directly to Firebase Storage under chat_audios/.
+ * WebM/Opus, 48000Hz, 64kbps.
+ */
+export async function uploadChatAudio(
+  blob: Blob,
+  fileName?: string,
+  onProgress?: (progress: number) => void
+): Promise<string> {
+  if (onProgress) onProgress(20);
+
+  if (!storage) {
+    throw new Error('Firebase Storage não disponível');
+  }
+
+  const name = fileName || `audio_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.webm`;
+  const storageRef = ref(storage, `chat_audios/${name}`);
+
+  const uploadTask = uploadBytesResumable(storageRef, blob, {
+    contentType: blob.type || 'audio/webm;codecs=opus'
+  });
+
+  return new Promise<string>((resolve, reject) => {
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        if (snapshot.totalBytes > 0 && onProgress) {
+          const progress = Math.min(
+            98,
+            Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+          );
+          onProgress(progress);
+        }
+      },
+      (error) => {
+        console.error('Falha no upload do áudio:', error);
+        reject(error);
+      },
+      async () => {
+        try {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          if (onProgress) onProgress(100);
+          resolve(downloadUrl);
+        } catch (urlErr) {
+          reject(urlErr);
+        }
+      }
+    );
+  });
+}
+
 // ========================================================
 // OFFLINE-FIRST LOCAL STORAGE PERSISTENCE (WHATSAPP STYLE)
 // ========================================================
@@ -469,10 +526,13 @@ export async function prefetchLatestChatMessages(db: Firestore): Promise<GroupMe
         text: d.text || '',
         replyToId: d.replyToId || null,
         createdAt: d.createdAt,
-        type: d.type || (d.imageUrl ? 'image' : 'text'),
+        type: d.type || (d.audioUrl || d.tipo === 'audio' ? 'audio' : d.imageUrl ? 'image' : 'text'),
         imageUrl: d.imageUrl,
         imageWidth: d.imageWidth,
         imageHeight: d.imageHeight,
+        audioUrl: d.audioUrl,
+        duracao: d.duracao,
+        tipo: d.tipo,
         isDeleted: d.isDeleted === true,
         reactions: d.reactions || {},
         userReactions: d.userReactions || {}
@@ -489,7 +549,7 @@ export async function prefetchLatestChatMessages(db: Firestore): Promise<GroupMe
         msg.replyToMessage = {
           id: original.id,
           displayName: original.displayName,
-          text: original.type === 'image' ? '📷 Foto' : original.text.slice(0, 75)
+          text: original.type === 'image' ? '📷 Foto' : (original.type === 'audio' || original.tipo === 'audio' ? '🎤 Nota de voz' : original.text.slice(0, 75))
         };
       }
     });

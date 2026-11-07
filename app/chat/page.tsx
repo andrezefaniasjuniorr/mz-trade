@@ -30,7 +30,9 @@ import {
   Check,
   Bell,
   Pin,
-  Flame
+  Flame,
+  Mic,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
@@ -63,10 +65,12 @@ import {
   saveLocalPrivateChats,
   compressChatImage,
   uploadImageWithProgress,
+  uploadChatAudio,
   playMessageSound,
   triggerPushNotification
 } from '@/lib/chatService';
 import WhatsAppLightbox from '@/components/WhatsAppLightbox';
+import WhatsAppAudioPlayer from '@/components/WhatsAppAudioPlayer';
 
 const AVAILABLE_REACTIONS = ['👍', '❤️', '🚀'];
 
@@ -112,6 +116,13 @@ function formatTime(ts: any) {
   }
   const d = ts.toDate ? ts.toDate() : (ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts));
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatRecordingTime(sec: number): string {
+  if (!sec || isNaN(sec) || sec < 0) return '00:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
 function formatDateHeader(ts: any) {
@@ -177,6 +188,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
   const isSystem = msg.type === 'system' && !isAnnouncement;
   const isMsgAdmin = msg.isAdmin;
   const isImage = msg.type === 'image' || !!msg.imageUrl || !!msg.localPreviewUrl;
+  const isAudio = msg.type === 'audio' || msg.tipo === 'audio' || !!msg.audioUrl;
 
   // ----------------------------------------------------
   // CARD DE COMUNICADO GERAL OFICIAL (ORGANIZADO, ELEGANTE E PROFISSIONAL)
@@ -519,6 +531,20 @@ const GroupMessageItem = memo(function GroupMessageItem({
             </div>
           )}
 
+          {/* Player de Áudio estilo WhatsApp */}
+          {isAudio && (msg.audioUrl || msg.localPreviewUrl) && !msg.isDeleted && (
+            <div className="mb-1">
+              <WhatsAppAudioPlayer
+                id={msg.id}
+                audioUrl={msg.audioUrl || msg.localPreviewUrl || ''}
+                duracao={msg.duracao}
+                isMe={isMe}
+                isUploading={msg.isUploading}
+                canPlay={Boolean(currentUserId)}
+              />
+            </div>
+          )}
+
           {/* Texto principal */}
           {msg.isDeleted ? (
             <p className="italic text-slate-400 text-[11px] flex items-center gap-1.5">
@@ -671,6 +697,7 @@ const PrivateMessageItem = memo(function PrivateMessageItem({
   onOpenImage
 }: PrivateMessageItemProps) {
   const isImage = msg.type === 'image' || !!msg.imageUrl || !!msg.localPreviewUrl;
+  const isAudio = msg.type === 'audio' || msg.tipo === 'audio' || !!msg.audioUrl;
   const effectiveImageUrl = msg.imageUrl || msg.localPreviewUrl;
 
   return (
@@ -754,6 +781,20 @@ const PrivateMessageItem = memo(function PrivateMessageItem({
             </div>
           )}
 
+          {/* Player de Áudio estilo WhatsApp */}
+          {isAudio && (msg.audioUrl || msg.localPreviewUrl) && (
+            <div className="mb-1">
+              <WhatsAppAudioPlayer
+                id={msg.id}
+                audioUrl={msg.audioUrl || msg.localPreviewUrl || ''}
+                duracao={msg.duracao}
+                isMe={isMe}
+                isUploading={msg.isUploading}
+                canPlay={true}
+              />
+            </div>
+          )}
+
           {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
 
           <div
@@ -832,6 +873,18 @@ export default function ChatPage() {
     time?: string;
   }>({ isOpen: false, url: null });
 
+  // --- GRAVAÇÃO DE ÁUDIO (ATÉ 01:30 MÁX, 48000Hz, 64kbps) ---
+  const [showMicPermissionModal, setShowMicPermissionModal] = useState<boolean>(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
+  const [recordingDuration, setRecordingDuration] = useState<number>(0);
+  const [recordingTarget, setRecordingTarget] = useState<'group' | 'private'>('group');
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
+
   // Refs
   const groupFilePickerRef = useRef<HTMLInputElement | null>(null);
   const privateFilePickerRef = useRef<HTMLInputElement | null>(null);
@@ -848,6 +901,27 @@ export default function ChatPage() {
   // Hardware Mobile Back Button listener
   useEffect(() => {
     const handlePopState = () => {
+      if (showMicPermissionModal) {
+        setShowMicPermissionModal(false);
+        return;
+      }
+      if (isRecordingAudio) {
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          try {
+            mediaRecorderRef.current.stop();
+          } catch {}
+        }
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((track) => track.stop());
+          audioStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+        setIsRecordingAudio(false);
+        setRecordingDuration(0);
+        return;
+      }
       if (lightboxData.isOpen) {
         setLightboxData({ isOpen: false, url: null });
         return;
@@ -870,7 +944,7 @@ export default function ChatPage() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [lightboxData.isOpen, pendingImage, adminSelectedUserId, activeSegment, router]);
+  }, [lightboxData.isOpen, pendingImage, adminSelectedUserId, activeSegment, showMicPermissionModal, isRecordingAudio, router]);
 
   // Toast
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -912,7 +986,7 @@ export default function ChatPage() {
         snapshot.forEach((docSnap) => {
           const d = docSnap.data();
           const isMsgAdmin = d.isAdmin === true || d.email === ADMIN_EMAIL;
-          const msgType = d.type || (d.imageUrl ? 'image' : (d.announcementTitle ? 'announcement' : 'text'));
+          const msgType = d.type || (d.audioUrl || d.tipo === 'audio' ? 'audio' : d.imageUrl ? 'image' : (d.announcementTitle ? 'announcement' : 'text'));
           const msg: GroupMessage = {
             id: docSnap.id,
             uid: d.uid || '',
@@ -923,6 +997,9 @@ export default function ChatPage() {
             replyToId: d.replyToId || null,
             createdAt: d.createdAt,
             type: msgType,
+            tipo: d.tipo,
+            audioUrl: d.audioUrl,
+            duracao: d.duracao,
             announcementTitle: d.announcementTitle || d.title || (msgType === 'announcement' ? 'COMUNICADO OFICIAL DA ADMINISTRAÇÃO' : undefined),
             announcementType: d.announcementType || d.alertType || 'info',
             pinned: Boolean(d.pinned),
@@ -945,7 +1022,7 @@ export default function ChatPage() {
             msg.replyToMessage = {
               id: original.id,
               displayName: original.displayName,
-              text: original.type === 'image' ? '📷 Foto' : original.text.slice(0, 75)
+              text: original.type === 'image' ? '📷 Foto' : (original.type === 'audio' || original.tipo === 'audio' ? '🎤 Nota de voz' : original.text.slice(0, 75))
             };
           }
         });
@@ -964,7 +1041,7 @@ export default function ChatPage() {
               if (typeof document !== 'undefined' && document.hidden) {
                 triggerPushNotification(
                   `TapRise • ${newest.displayName}`,
-                  newest.type === 'image' ? '📷 Foto' : newest.text
+                  newest.type === 'image' ? '📷 Foto' : (newest.type === 'audio' || newest.tipo === 'audio' ? '🎤 Nota de voz' : newest.text)
                 );
               }
             }
@@ -1186,7 +1263,13 @@ export default function ChatPage() {
     const timer = setTimeout(() => {
       initialMountRef.current = false;
     }, 1500);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
   }, []);
 
   // 5. CHAT PRIVADO: LISTENER DE MENSAGENS DA CONVERSA SELECIONADA
@@ -1221,10 +1304,13 @@ export default function ChatPage() {
             senderEmail: d.senderEmail || '',
             isAdmin: d.isAdmin === true || d.senderEmail === ADMIN_EMAIL,
             text: d.text || '',
-            type: d.type || (d.imageUrl ? 'image' : 'text'),
+            type: d.type || (d.audioUrl || d.tipo === 'audio' ? 'audio' : d.imageUrl ? 'image' : 'text'),
             imageUrl: d.imageUrl,
             imageWidth: d.imageWidth,
             imageHeight: d.imageHeight,
+            audioUrl: d.audioUrl,
+            duracao: d.duracao,
+            tipo: d.tipo,
             createdAt: d.createdAt,
             read: d.read === true
           });
@@ -1325,6 +1411,292 @@ export default function ChatPage() {
       e.target.value = '';
     }
   };
+
+  // --- MÉTODOS DE GRAVAÇÃO E ENVIO DE ÁUDIO (OPUS 48000Hz, 64kbps, MÁX 01:30) ---
+  const cancelAudioRecording = useCallback(() => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    setIsRecordingAudio(false);
+    setRecordingDuration(0);
+  }, []);
+
+  const executeSendAudio = useCallback(async (audioBlob: Blob, durationSeconds: number, target: 'group' | 'private') => {
+    if (!user) return;
+    const localUrl = URL.createObjectURL(audioBlob);
+
+    if (target === 'group') {
+      const tempId = `temp-audio-${Date.now()}`;
+      const replyTarget = replyingTo;
+      const optimisticMsg: GroupMessage = {
+        id: tempId,
+        uid: user.uid,
+        displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
+        email: user.email || '',
+        isAdmin,
+        text: '',
+        tipo: 'audio',
+        type: 'audio',
+        audioUrl: localUrl,
+        localPreviewUrl: localUrl,
+        duracao: durationSeconds,
+        replyToId: replyTarget ? replyTarget.id : null,
+        replyToMessage: replyTarget
+          ? {
+              id: replyTarget.id,
+              displayName: replyTarget.displayName,
+              text: replyTarget.type === 'image' ? '📷 Foto' : (replyTarget.type === 'audio' || replyTarget.tipo === 'audio' ? '🎤 Nota de voz' : replyTarget.text.slice(0, 75))
+            }
+          : null,
+        createdAt: new Date(),
+        isUploading: true
+      };
+
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setReplyingTo(null);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+      try {
+        const audioUrl = await uploadChatAudio(audioBlob);
+
+        // Firestore guarda só: tipo: "audio", audioUrl, duracao (SEM base64)
+        await addDoc(collection(db, 'taprise_group_messages'), {
+          uid: user.uid,
+          displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
+          email: user.email || '',
+          isAdmin,
+          text: '',
+          tipo: 'audio',
+          type: 'audio',
+          audioUrl,
+          duracao: durationSeconds,
+          replyToId: replyTarget ? replyTarget.id : null,
+          isDeleted: false,
+          reactions: {},
+          userReactions: {},
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error('Erro ao enviar áudio no grupo:', err);
+        showToast('Falha ao enviar áudio. Tente novamente.', 'error');
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      }
+    } else {
+      // Chat Privado
+      const targetUid = isAdmin ? adminSelectedUserId : user.uid;
+      if (!targetUid) return;
+
+      const tempId = `temp-priv-audio-${Date.now()}`;
+      const senderName = userProfile?.nome || user.displayName || (isAdmin ? 'Administração TapRise' : 'Investidor');
+      const optimisticMsg: PrivateMessage = {
+        id: tempId,
+        uid: user.uid,
+        senderName,
+        senderEmail: user.email || '',
+        isAdmin,
+        text: '',
+        tipo: 'audio',
+        type: 'audio',
+        audioUrl: localUrl,
+        localPreviewUrl: localUrl,
+        duracao: durationSeconds,
+        createdAt: new Date(),
+        read: false,
+        isUploading: true
+      };
+
+      setPrivateMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => privateEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+      try {
+        const audioUrl = await uploadChatAudio(audioBlob);
+
+        await addDoc(collection(db, 'private_chats', targetUid, 'messages'), {
+          uid: user.uid,
+          senderName,
+          senderEmail: user.email || '',
+          isAdmin,
+          text: '',
+          tipo: 'audio',
+          type: 'audio',
+          audioUrl,
+          duracao: durationSeconds,
+          createdAt: serverTimestamp(),
+          read: false
+        });
+
+        await setDoc(
+          doc(db, 'private_chats', targetUid),
+          {
+            uid: targetUid,
+            userName: isAdmin ? (privateChatsList.find((c) => c.uid === targetUid)?.userName || 'Investidor') : senderName,
+            userEmail: isAdmin ? (privateChatsList.find((c) => c.uid === targetUid)?.userEmail || '') : (user.email || ''),
+            lastMessage: '🎤 Nota de voz',
+            lastMessageType: 'audio',
+            lastMessageAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            ...(isAdmin
+              ? { unreadUserCount: 1 }
+              : { unreadAdminCount: 1 })
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.error('Erro ao enviar áudio no privado:', err);
+        showToast('Falha ao enviar áudio.', 'error');
+        setPrivateMessages((prev) => prev.filter((m) => m.id !== tempId));
+      }
+    }
+  }, [user, userProfile, isAdmin, replyingTo, adminSelectedUserId, privateChatsList, showToast]);
+
+  const stopAndSendAudio = useCallback((forcedDuration?: number, targetOverride?: 'group' | 'private') => {
+    if (!mediaRecorderRef.current) return;
+    const target = targetOverride || recordingTarget;
+    const duration = forcedDuration || Math.max(1, recordingDuration);
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    const recorder = mediaRecorderRef.current;
+    const mimeType = recorder.mimeType || 'audio/webm';
+
+    recorder.onstop = async () => {
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((track) => track.stop());
+        audioStreamRef.current = null;
+      }
+
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      audioChunksRef.current = [];
+      mediaRecorderRef.current = null;
+      setIsRecordingAudio(false);
+      setRecordingDuration(0);
+
+      if (audioBlob.size < 400) {
+        showToast('Áudio muito curto para envio.', 'info');
+        return;
+      }
+
+      await executeSendAudio(audioBlob, duration, target);
+    };
+
+    try {
+      recorder.stop();
+    } catch {
+      cancelAudioRecording();
+    }
+  }, [recordingTarget, recordingDuration, showToast, executeSendAudio, cancelAudioRecording]);
+
+  const startAudioRecording = useCallback(async (target: 'group' | 'private') => {
+    try {
+      // Qualidade: webm/opus, 48000Hz, 64kbps, echoCancellation, noiseSuppression, sem distorção
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : '';
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: mimeType || undefined,
+        audioBitsPerSecond: 64000
+      });
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+
+      setIsRecordingAudio(true);
+      setRecordingDuration(0);
+      setRecordingTarget(target);
+      const startTime = Date.now();
+      recordingStartTimeRef.current = startTime;
+
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setRecordingDuration(elapsed);
+
+        // Parar sozinho aos 01:30 (90 segundos)
+        if (elapsed >= 90) {
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+          stopAndSendAudio(90, target);
+        }
+      }, 250);
+
+    } catch (err: any) {
+      console.warn('Erro ao aceder ao microfone:', err);
+      showToast('Acesso ao microfone não concedido.', 'error');
+      cancelAudioRecording();
+    }
+  }, [showToast, cancelAudioRecording, stopAndSendAudio]);
+
+  const handleConfirmMicPermission = useCallback(async () => {
+    setShowMicPermissionModal(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('taprise_mic_allowed', 'true');
+    }
+    await startAudioRecording(recordingTarget);
+  }, [recordingTarget, startAudioRecording]);
+
+  const handleMicClick = useCallback((isPrivate = false) => {
+    if (!user) {
+      showToast('Por favor, inicie sessão para gravar notas de voz.', 'error');
+      router.push('/login');
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      showToast('O seu navegador não suporta gravação de áudio.', 'error');
+      return;
+    }
+
+    const targetMode = isPrivate ? 'private' : 'group';
+    setRecordingTarget(targetMode);
+
+    const previouslyAllowed = typeof window !== 'undefined' && localStorage.getItem('taprise_mic_allowed') === 'true';
+    if (!previouslyAllowed) {
+      setShowMicPermissionModal(true);
+      return;
+    }
+
+    startAudioRecording(targetMode);
+  }, [user, showToast, router, startAudioRecording]);
 
   // ENVIAR MENSAGEM NO GRUPO (TEXTO, EDIÇÃO OU IMAGEM COM PROGRESSO NO BALÃO)
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1763,6 +2135,51 @@ export default function ChatPage() {
         onClose={() => setLightboxData({ isOpen: false, url: null })}
       />
 
+      {/* MODAL DE PERMISSÃO DE MICROFONE PROFISSIONAL (NUNCA MOSTRA LINKS/URLS) */}
+      <AnimatePresence>
+        {showMicPermissionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              transition={{ duration: 0.18 }}
+              className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl text-center space-y-4 relative"
+            >
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shadow-lg">
+                <Mic className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-white tracking-wide">
+                  Permitir acesso ao microfone
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Para gravar e enviar notas de voz no chat com clareza e sem ruídos, precisamos de autorização para usar o microfone deste dispositivo.
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMicPermissionModal(false)}
+                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700/80 transition cursor-pointer"
+                >
+                  Agora não
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmMicPermission}
+                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 shadow-md shadow-blue-600/30 transition cursor-pointer"
+                >
+                  Permitir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Inputs de arquivo ocultos (aceita apenas jpg, png, webp max 3MB) */}
       <input
         ref={groupFilePickerRef}
@@ -2096,83 +2513,142 @@ export default function ChatPage() {
             </AnimatePresence>
 
             <div className="p-3 sm:p-4">
-              <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
-                
-                {/* Botão [📷] para abrir file picker */}
-                <button
-                  type="button"
-                  onClick={() => groupFilePickerRef.current?.click()}
-                  className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
-                  title="Enviar foto (JPG, PNG, WebP máx 3MB)"
-                >
-                  <Camera className="w-5 h-5 text-blue-400" />
-                </button>
+              {isRecordingAudio && recordingTarget === 'group' ? (
+                <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 bg-slate-950 border border-rose-500/50 rounded-2xl px-4 py-2.5 shadow-lg">
+                  {/* Gravando indicador e tempo */}
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="relative flex items-center justify-center shrink-0">
+                      <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping absolute" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-600 relative" />
+                    </div>
+                    <div className="flex items-center space-x-1 font-mono text-xs font-bold text-white shrink-0">
+                      <span className={recordingDuration >= 80 ? 'text-amber-400' : 'text-rose-400'}>
+                        {formatRecordingTime(recordingDuration)}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-normal">/ 01:30</span>
+                    </div>
+                    <div className="hidden sm:flex items-center space-x-1 pl-2">
+                      <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:0ms]" />
+                      <span className="w-1 h-5 bg-rose-500 rounded-full animate-bounce [animation-delay:150ms]" />
+                      <span className="w-1 h-2 bg-rose-500/70 rounded-full animate-bounce [animation-delay:300ms]" />
+                      <span className="w-1 h-6 bg-rose-500 rounded-full animate-bounce [animation-delay:75ms]" />
+                      <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:225ms]" />
+                    </div>
+                  </div>
 
-                <div className="flex-1 relative flex items-center">
-                  <textarea
-                    ref={inputRef}
-                    rows={1}
-                    value={inputText}
-                    onChange={(e) => {
-                      setInputText(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage(e as any);
-                      }
-                    }}
-                    placeholder={
-                      editingMessage
-                        ? 'Edite a sua mensagem...'
-                        : pendingImage
-                        ? 'Adicione uma legenda à foto...'
-                        : 'Escreva uma mensagem para o Grupo TapRise...'
-                    }
-                    maxLength={500}
-                    className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
-                  />
-                  {inputText.length > 400 && (
-                    <span className="absolute right-3 bottom-3 text-[10px] font-mono text-amber-400 pointer-events-none">
-                      {500 - inputText.length}
-                    </span>
-                  )}
+                  {/* Ações: Cancelar e Enviar Áudio */}
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={cancelAudioRecording}
+                      className="px-3 py-2 rounded-xl text-rose-400 hover:text-white hover:bg-rose-950/60 transition text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      title="Cancelar gravação"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Cancelar</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => stopAndSendAudio()}
+                      className="w-10 h-10 rounded-xl bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white flex items-center justify-center shadow-md transition cursor-pointer"
+                      title="Enviar nota de voz"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
+                  
+                  {/* Botão [📷] para abrir file picker */}
+                  <button
+                    type="button"
+                    onClick={() => groupFilePickerRef.current?.click()}
+                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
+                    title="Enviar foto (JPG, PNG, WebP máx 3MB)"
+                  >
+                    <Camera className="w-5 h-5 text-blue-400" />
+                  </button>
 
-              <button
-                type="submit"
-                disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin && !editingMessage)}
-                className={`px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed ${
-                  cooldown > 0 && !isAdmin && !editingMessage
-                    ? 'bg-slate-800 text-slate-400 border border-slate-700 opacity-60'
-                    : editingMessage
-                    ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-amber-600/30'
-                    : 'bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white shadow-blue-600/30'
-                }`}
-                title={editingMessage ? 'Salvar alterações' : 'Enviar mensagem'}
-              >
-                {isSending ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                ) : cooldown > 0 && !isAdmin && !editingMessage ? (
-                  <>
-                    <Clock className="w-4 h-4 text-amber-400 animate-spin" />
-                    <span>{cooldown}s</span>
-                  </>
-                ) : editingMessage ? (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span className="hidden sm:inline">Salvar</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span className="hidden sm:inline">Enviar</span>
-                  </>
-                )}
-              </button>
-              </form>
+                  <div className="flex-1 relative flex items-center">
+                    <textarea
+                      ref={inputRef}
+                      rows={1}
+                      value={inputText}
+                      onChange={(e) => {
+                        setInputText(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage(e as any);
+                        }
+                      }}
+                      placeholder={
+                        editingMessage
+                          ? 'Edite a sua mensagem...'
+                          : pendingImage
+                          ? 'Adicione uma legenda à foto...'
+                          : 'Escreva uma mensagem para o Grupo TapRise...'
+                      }
+                      maxLength={500}
+                      className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
+                    />
+                    {inputText.length > 400 && (
+                      <span className="absolute right-3 bottom-3 text-[10px] font-mono text-amber-400 pointer-events-none">
+                        {500 - inputText.length}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Botão ao lado do texto: Microfone se vazio, Enviar se tiver texto/foto */}
+                  {!inputText.trim() && !pendingImage && !editingMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => handleMicClick(false)}
+                      className="p-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-2xl transition shadow-md shadow-emerald-900/30 flex items-center justify-center cursor-pointer shrink-0 mb-0.5"
+                      title="Gravar nota de voz (máx 01:30)"
+                    >
+                      <Mic className="w-5 h-5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin && !editingMessage)}
+                      className={`px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed mb-0.5 ${
+                        cooldown > 0 && !isAdmin && !editingMessage
+                          ? 'bg-slate-800 text-slate-400 border border-slate-700 opacity-60'
+                          : editingMessage
+                          ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-amber-600/30'
+                          : 'bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white shadow-blue-600/30'
+                      }`}
+                      title={editingMessage ? 'Salvar alterações' : 'Enviar mensagem'}
+                    >
+                      {isSending ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      ) : cooldown > 0 && !isAdmin && !editingMessage ? (
+                        <>
+                          <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                          <span>{cooldown}s</span>
+                        </>
+                      ) : editingMessage ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span className="hidden sm:inline">Salvar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          <span className="hidden sm:inline">Enviar</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </form>
+              )}
             </div>
           </footer>
         </div>
@@ -2377,59 +2853,117 @@ export default function ChatPage() {
               </AnimatePresence>
 
               <div className="p-3 sm:p-4">
-                <form onSubmit={handleSendPrivateMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => privateFilePickerRef.current?.click()}
-                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
-                    title="Enviar foto para o Admin (máx 3MB)"
-                  >
-                    <Camera className="w-5 h-5 text-amber-400" />
-                  </button>
+                {isRecordingAudio && recordingTarget === 'private' ? (
+                  <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 bg-slate-950 border border-rose-500/50 rounded-2xl px-4 py-2.5 shadow-lg">
+                    {/* Gravando indicador e tempo */}
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <div className="relative flex items-center justify-center shrink-0">
+                        <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping absolute" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-600 relative" />
+                      </div>
+                      <div className="flex items-center space-x-1 font-mono text-xs font-bold text-white shrink-0">
+                        <span className={recordingDuration >= 80 ? 'text-amber-400' : 'text-rose-400'}>
+                          {formatRecordingTime(recordingDuration)}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-normal">/ 01:30</span>
+                      </div>
+                      <div className="hidden sm:flex items-center space-x-1 pl-2">
+                        <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:0ms]" />
+                        <span className="w-1 h-5 bg-rose-500 rounded-full animate-bounce [animation-delay:150ms]" />
+                        <span className="w-1 h-2 bg-rose-500/70 rounded-full animate-bounce [animation-delay:300ms]" />
+                        <span className="w-1 h-6 bg-rose-500 rounded-full animate-bounce [animation-delay:75ms]" />
+                        <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:225ms]" />
+                      </div>
+                    </div>
 
-                  <div className="flex-1 relative flex items-center">
-                    <textarea
-                      ref={privateInputRef}
-                      rows={1}
-                      value={privateInputText}
-                      onChange={(e) => {
-                        setPrivateInputText(e.target.value);
-                        e.target.style.height = 'auto';
-                        e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendPrivateMessage(e as any);
-                        }
-                      }}
-                      placeholder={
-                        pendingImage
-                          ? 'Adicione uma nota à foto...'
-                          : isAdmin
-                          ? 'Responder ao investidor...'
-                          : 'Mensagem privada para o Admin...'
-                      }
-                      maxLength={600}
-                      className="w-full pl-4 pr-10 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
-                    />
-                  </div>
+                    {/* Ações: Cancelar e Enviar Áudio */}
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={cancelAudioRecording}
+                        className="px-3 py-2 rounded-xl text-rose-400 hover:text-white hover:bg-rose-950/60 transition text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        title="Cancelar gravação"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span className="hidden sm:inline">Cancelar</span>
+                      </button>
 
-                  <button
-                    type="submit"
-                    disabled={(!privateInputText.trim() && !pendingImage) || isSendingPrivate}
-                    className="px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mb-0.5"
-                  >
-                    {isSendingPrivate ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                    ) : (
-                      <>
+                      <button
+                        type="button"
+                        onClick={() => stopAndSendAudio()}
+                        className="w-10 h-10 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center justify-center shadow-md transition cursor-pointer"
+                        title="Enviar nota de voz"
+                      >
                         <Send className="w-4 h-4" />
-                        <span className="hidden sm:inline">Enviar</span>
-                      </>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSendPrivateMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => privateFilePickerRef.current?.click()}
+                      className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
+                      title="Enviar foto para o Admin (máx 3MB)"
+                    >
+                      <Camera className="w-5 h-5 text-amber-400" />
+                    </button>
+
+                    <div className="flex-1 relative flex items-center">
+                      <textarea
+                        ref={privateInputRef}
+                        rows={1}
+                        value={privateInputText}
+                        onChange={(e) => {
+                          setPrivateInputText(e.target.value);
+                          e.target.style.height = 'auto';
+                          e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendPrivateMessage(e as any);
+                          }
+                        }}
+                        placeholder={
+                          pendingImage
+                            ? 'Adicione uma nota à foto...'
+                            : isAdmin
+                            ? 'Responder ao investidor...'
+                            : 'Mensagem privada para o Admin...'
+                        }
+                        maxLength={600}
+                        className="w-full pl-4 pr-10 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
+                      />
+                    </div>
+
+                    {!privateInputText.trim() && !pendingImage ? (
+                      <button
+                        type="button"
+                        onClick={() => handleMicClick(true)}
+                        className="p-3 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 rounded-2xl transition shadow-md shadow-amber-900/30 flex items-center justify-center cursor-pointer shrink-0 mb-0.5"
+                        title="Gravar nota de voz (máx 01:30)"
+                      >
+                        <Mic className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={(!privateInputText.trim() && !pendingImage) || isSendingPrivate}
+                        className="px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mb-0.5"
+                      >
+                        {isSendingPrivate ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4" />
+                            <span className="hidden sm:inline">Enviar</span>
+                          </>
+                        )}
+                      </button>
                     )}
-                  </button>
-                </form>
+                  </form>
+                )}
               </div>
             </footer>
 
