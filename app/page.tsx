@@ -1868,7 +1868,7 @@ export default function Home() {
                     {notificationPermission !== 'granted' && (
                       <div className="my-2 p-2.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
                         <p className="text-[11px] font-bold text-blue-900">Alertas de Mensagens no Celular</p>
-                        <p className="text-[10px] text-slate-600 mt-0.5">Receba avisos instantâneos de mensagens no chat, estilo WhatsApp.</p>
+                        <p className="text-[10px] text-slate-600 mt-0.5">Receba avisos instantâneos de mensagens no chat em tempo real.</p>
                         <button
                           type="button"
                           onClick={async () => {
