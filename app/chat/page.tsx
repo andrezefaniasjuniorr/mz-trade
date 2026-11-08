@@ -167,6 +167,7 @@ interface GroupMessageItemProps {
   onScrollToReply: (replyId: string) => void;
   onOpenImage: (url: string, caption?: string, author?: string, time?: string) => void;
   currentUserId?: string;
+  userPhoto?: string;
 }
 
 const GroupMessageItem = memo(function GroupMessageItem({
@@ -179,7 +180,8 @@ const GroupMessageItem = memo(function GroupMessageItem({
   onReact,
   onScrollToReply,
   onOpenImage,
-  currentUserId
+  currentUserId,
+  userPhoto
 }: GroupMessageItemProps) {
   const [showPicker, setShowPicker] = useState(false);
   const isAnnouncement =
@@ -428,14 +430,24 @@ const GroupMessageItem = memo(function GroupMessageItem({
       className={`flex items-end gap-2 group transition relative ${isMe ? 'justify-end' : 'justify-start'}`}
     >
       {!isMe && (
-        <div
-          className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-xs ${getAvatarBg(
-            msg.displayName,
-            isMsgAdmin
-          )}`}
-        >
-          {msg.displayName ? msg.displayName.charAt(0).toUpperCase() : 'U'}
-        </div>
+        (msg.fotoPerfil || userPhoto || msg.photoURL) ? (
+          <img
+            src={msg.fotoPerfil || userPhoto || msg.photoURL}
+            alt={msg.displayName}
+            onClick={() => onOpenImage(msg.fotoPerfil || userPhoto || msg.photoURL || '', 'Foto de perfil', msg.displayName)}
+            className="w-8 h-8 rounded-xl object-cover shrink-0 select-none shadow-xs border border-slate-700/60 cursor-pointer hover:opacity-90 hover:scale-105 active:scale-95 transition"
+            title={`Clique para ver a foto de perfil de ${msg.displayName}`}
+          />
+        ) : (
+          <div
+            className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-xs ${getAvatarBg(
+              msg.displayName,
+              isMsgAdmin
+            )}`}
+          >
+            {msg.displayName ? msg.displayName.charAt(0).toUpperCase() : 'U'}
+          </div>
+        )
       )}
 
       <div className={`max-w-[85%] sm:max-w-md relative flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
@@ -690,16 +702,19 @@ interface PrivateMessageItemProps {
   msg: PrivateMessage;
   isMe: boolean;
   onOpenImage: (url: string, caption?: string, author?: string, time?: string) => void;
+  userPhoto?: string;
 }
 
 const PrivateMessageItem = memo(function PrivateMessageItem({
   msg,
   isMe,
-  onOpenImage
+  onOpenImage,
+  userPhoto
 }: PrivateMessageItemProps) {
   const isImage = msg.type === 'image' || !!msg.imageUrl || !!msg.localPreviewUrl;
   const isAudio = msg.type === 'audio' || msg.tipo === 'audio' || !!msg.audioUrl;
   const effectiveImageUrl = msg.imageUrl || msg.localPreviewUrl;
+  const effectivePhoto = msg.fotoPerfil || userPhoto || msg.photoURL;
 
   return (
     <motion.div
@@ -709,15 +724,25 @@ const PrivateMessageItem = memo(function PrivateMessageItem({
       className={`flex items-end gap-2 my-2 ${isMe ? 'justify-end' : 'justify-start'}`}
     >
       {!isMe && (
-        <div
-          className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-xs ${
-            msg.isAdmin
-              ? 'bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 font-black'
-              : 'bg-emerald-600 text-white'
-          }`}
-        >
-          {msg.isAdmin ? '🛡️' : (msg.senderName ? msg.senderName.charAt(0).toUpperCase() : 'U')}
-        </div>
+        effectivePhoto ? (
+          <img
+            src={effectivePhoto}
+            alt={msg.senderName}
+            onClick={() => onOpenImage(effectivePhoto, 'Foto de perfil', msg.senderName)}
+            className="w-8 h-8 rounded-xl object-cover shrink-0 cursor-pointer select-none shadow-xs border border-slate-700/60 hover:opacity-90 hover:scale-105 active:scale-95 transition"
+            title={`Clique para ver a foto de perfil de ${msg.senderName}`}
+          />
+        ) : (
+          <div
+            className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-xs ${
+              msg.isAdmin
+                ? 'bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 font-black'
+                : 'bg-emerald-600 text-white'
+            }`}
+          >
+            {msg.isAdmin ? '🛡️' : (msg.senderName ? msg.senderName.charAt(0).toUpperCase() : 'U')}
+          </div>
+        )
       )}
 
       <div className={`max-w-[85%] sm:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
@@ -847,6 +872,28 @@ export default function ChatPage() {
     pinnedText?: string;
     pinnedAuthor?: string;
   } | null>(null);
+
+  // Mapa de fotos de perfil em tempo real para sincronização instantânea
+  const [userPhotos, setUserPhotos] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        const photosMap: Record<string, string> = {};
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data();
+          const p = d.fotoPerfil || d.photoURL;
+          if (p) {
+            photosMap[docSnap.id] = p;
+          }
+        });
+        setUserPhotos(photosMap);
+      },
+      (err) => console.warn('Erro ao escutar fotos de perfil de usuários:', err)
+    );
+    return () => unsub();
+  }, []);
 
   // --- ESTADO DO CHAT PRIVADO ---
   const [privateChatsList, setPrivateChatsList] = useState<PrivateChatDoc[]>(() => loadLocalPrivateChats());
@@ -1011,7 +1058,9 @@ export default function ChatPage() {
             imageHeight: d.imageHeight,
             isDeleted: d.isDeleted === true,
             reactions: d.reactions || {},
-            userReactions: d.userReactions || {}
+            userReactions: d.userReactions || {},
+            fotoPerfil: d.fotoPerfil || d.photoURL || '',
+            photoURL: d.photoURL || d.fotoPerfil || ''
           };
           list.push(msg);
           msgMap.set(docSnap.id, msg);
@@ -1207,6 +1256,8 @@ export default function ChatPage() {
               uid: docSnap.id,
               userName: d.userName || 'Investidor',
               userEmail: d.userEmail || '',
+              fotoPerfil: d.fotoPerfil || d.photoURL || '',
+              photoURL: d.photoURL || d.fotoPerfil || '',
               lastMessage: d.lastMessage || '',
               lastMessageAt: d.lastMessageAt,
               lastMessageType: d.lastMessageType || 'text',
@@ -1314,6 +1365,8 @@ export default function ChatPage() {
             audioUrl: d.audioUrl,
             duracao: d.duracao,
             tipo: d.tipo,
+            fotoPerfil: d.fotoPerfil || d.photoURL || '',
+            photoURL: d.photoURL || d.fotoPerfil || '',
             createdAt: d.createdAt,
             read: d.read === true
           });
@@ -1485,6 +1538,8 @@ export default function ChatPage() {
           displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
           email: user.email || '',
           isAdmin,
+          fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+          photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
           text: '',
           tipo: 'audio',
           type: 'audio',
@@ -1514,6 +1569,8 @@ export default function ChatPage() {
         senderName,
         senderEmail: user.email || '',
         isAdmin,
+        fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+        photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
         text: '',
         tipo: 'audio',
         type: 'audio',
@@ -1540,6 +1597,8 @@ export default function ChatPage() {
           senderName,
           senderEmail: user.email || '',
           isAdmin,
+          fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+          photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
           text: '',
           tipo: 'audio',
           type: 'audio',
@@ -1555,6 +1614,8 @@ export default function ChatPage() {
             uid: targetUid,
             userName: isAdmin ? (privateChatsList.find((c) => c.uid === targetUid)?.userName || 'Investidor') : senderName,
             userEmail: isAdmin ? (privateChatsList.find((c) => c.uid === targetUid)?.userEmail || '') : (user.email || ''),
+            fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+            photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
             lastMessage: '🎤 Nota de voz',
             lastMessageType: 'audio',
             lastMessageAt: serverTimestamp(),
@@ -1815,6 +1876,8 @@ export default function ChatPage() {
             displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
             email: user.email || '',
             isAdmin,
+            fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+            photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
             text: textToSend,
             type: 'image',
             imageUrl: downloadUrl,
@@ -1837,6 +1900,8 @@ export default function ChatPage() {
           displayName: userProfile?.nome || user.displayName || 'Investidor TapRise',
           email: user.email || '',
           isAdmin,
+          fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+          photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
           text: textToSend,
           replyToId: replyTarget ? replyTarget.id : null,
           type: 'text',
@@ -1950,6 +2015,8 @@ export default function ChatPage() {
         senderName,
         senderEmail: user.email || '',
         isAdmin,
+        fotoPerfil: userProfile?.fotoPerfil || userProfile?.photoURL || '',
+        photoURL: userProfile?.fotoPerfil || userProfile?.photoURL || '',
         text: textToSend,
         type: isImg ? 'image' : 'text',
         imageUrl: downloadUrl || null,
@@ -1971,6 +2038,8 @@ export default function ChatPage() {
           uid: targetUid,
           userName: targetUserName,
           userEmail: targetUserEmail,
+          fotoPerfil: targetUserDoc?.fotoPerfil || userProfile?.fotoPerfil || userProfile?.photoURL || '',
+          photoURL: targetUserDoc?.photoURL || userProfile?.photoURL || '',
           lastMessage: isImg ? (textToSend ? `📷 ${textToSend}` : '📷 Imagem enviada') : textToSend,
           lastMessageAt: serverTimestamp(),
           lastMessageType: isImg ? 'image' : 'text',
@@ -2284,10 +2353,18 @@ export default function ChatPage() {
         <div className="flex items-center space-x-2">
           <Link
             href="/"
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-400 transition cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-400 transition cursor-pointer overflow-hidden"
             title="Perfil do Investidor"
           >
-            {userProfile?.nome ? userProfile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')}
+            {userProfile?.fotoPerfil || userProfile?.photoURL ? (
+              <img
+                src={userProfile.fotoPerfil || userProfile.photoURL}
+                alt="Meu Perfil"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              userProfile?.nome ? userProfile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')
+            )}
           </Link>
         </div>
       </header>
@@ -2371,6 +2448,7 @@ export default function ChatPage() {
                       onScrollToReply={scrollToMessage}
                       onOpenImage={handleOpenLightbox}
                       currentUserId={user?.uid}
+                      userPhoto={userPhotos[msg.uid]}
                     />
                   </React.Fragment>
                 );
@@ -2705,9 +2783,22 @@ export default function ChatPage() {
                             : 'hover:bg-slate-800/50'
                         }`}
                       >
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center shrink-0 shadow-xs">
-                          {chat.userName ? chat.userName.charAt(0).toUpperCase() : 'U'}
-                        </div>
+                        {chat.fotoPerfil || userPhotos[chat.uid] ? (
+                          <img
+                            src={chat.fotoPerfil || userPhotos[chat.uid]}
+                            alt={chat.userName}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenLightbox(chat.fotoPerfil || userPhotos[chat.uid], 'Foto de perfil de ' + chat.userName, chat.userName);
+                            }}
+                            className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-xs border border-slate-700 hover:scale-105 transition cursor-pointer"
+                            title="Ver foto de perfil"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center shrink-0 shadow-xs">
+                            {chat.userName ? chat.userName.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                        )}
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-0.5">
@@ -2807,6 +2898,7 @@ export default function ChatPage() {
                       msg={msg}
                       isMe={isMe}
                       onOpenImage={handleOpenLightbox}
+                      userPhoto={userPhotos[msg.uid]}
                     />
                   );
                 })

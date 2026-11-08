@@ -51,6 +51,8 @@ export interface UserProfile {
   commissionPaid?: boolean; // Se a comissão de 5% sobre o 1º crédito já foi paga
   totalComissoes?: number;
   indicadosCount?: number;
+  fotoPerfil?: string;
+  photoURL?: string;
   criadoEm?: unknown;
   atualizadoEm?: unknown;
 }
@@ -88,6 +90,8 @@ interface AuthContextType {
   loginGuest: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateBalance: (saldo: number, patrimonio?: number) => Promise<void>;
+  updateProfilePhoto: (photoDataUrl: string) => Promise<{ success: boolean; error?: string }>;
+  removeProfilePhoto: () => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -184,6 +188,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           commissionPaid: typeof data.commissionPaid === 'boolean' ? data.commissionPaid : false,
           totalComissoes: typeof data.totalComissoes === 'number' ? data.totalComissoes : 0,
           indicadosCount: typeof data.indicadosCount === 'number' ? data.indicadosCount : 0,
+          fotoPerfil: data.fotoPerfil || data.photoURL || cached?.fotoPerfil || '',
+          photoURL: data.photoURL || data.fotoPerfil || cached?.photoURL || '',
           criadoEm: data.criadoEm,
           atualizadoEm: data.atualizadoEm
         };
@@ -204,7 +210,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           inviteCode: myInviteCode,
           commissionPaid: false,
           totalComissoes: 0,
-          indicadosCount: 0
+          indicadosCount: 0,
+          fotoPerfil: cached?.fotoPerfil || '',
+          photoURL: cached?.photoURL || ''
         };
         saveCachedProfile(newProfile);
         setDoc(userRef, {
@@ -282,6 +290,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   commissionPaid: typeof data.commissionPaid === 'boolean' ? data.commissionPaid : (prev?.commissionPaid || false),
                   totalComissoes: typeof data.totalComissoes === 'number' ? data.totalComissoes : (prev?.totalComissoes || 0),
                   indicadosCount: typeof data.indicadosCount === 'number' ? data.indicadosCount : (prev?.indicadosCount || 0),
+                  fotoPerfil: data.fotoPerfil || data.photoURL || prev?.fotoPerfil || '',
+                  photoURL: data.photoURL || data.fotoPerfil || prev?.photoURL || '',
                   criadoEm: data.criadoEm || prev?.criadoEm,
                   atualizadoEm: data.atualizadoEm || prev?.atualizadoEm
                 };
@@ -607,6 +617,99 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ATUALIZAR FOTO DE PERFIL (Instantâneo no Firestore e Chat)
+  const updateProfilePhoto = async (photoDataUrl: string): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Utilizador não autenticado.' };
+
+    setUserProfile((prev) => {
+      if (!prev) return null;
+      const updated: UserProfile = {
+        ...prev,
+        fotoPerfil: photoDataUrl,
+        photoURL: photoDataUrl
+      };
+      saveCachedProfile(updated);
+      return updated;
+    });
+
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await setDoc(
+        userRef,
+        {
+          fotoPerfil: photoDataUrl,
+          photoURL: photoDataUrl,
+          atualizadoEm: serverTimestamp()
+        },
+        { merge: true }
+      );
+
+      // Sincronizar com coleção usuarios/{uid}
+      try {
+        await setDoc(
+          doc(db, 'usuarios', user.uid),
+          {
+            fotoPerfil: photoDataUrl,
+            photoURL: photoDataUrl,
+            atualizadoEm: serverTimestamp()
+          },
+          { merge: true }
+        );
+      } catch {}
+
+      return { success: true };
+    } catch (err) {
+      console.warn('Erro ao sincronizar foto de perfil no Firestore:', err);
+      return { success: false, error: 'Erro ao guardar foto de perfil.' };
+    }
+  };
+
+  // REMOVER FOTO DE PERFIL
+  const removeProfilePhoto = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Utilizador não autenticado.' };
+
+    setUserProfile((prev) => {
+      if (!prev) return null;
+      const updated: UserProfile = {
+        ...prev,
+        fotoPerfil: '',
+        photoURL: ''
+      };
+      saveCachedProfile(updated);
+      return updated;
+    });
+
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await setDoc(
+        userRef,
+        {
+          fotoPerfil: '',
+          photoURL: '',
+          atualizadoEm: serverTimestamp()
+        },
+        { merge: true }
+      );
+
+      try {
+        await setDoc(
+          doc(db, 'usuarios', user.uid),
+          {
+            fotoPerfil: '',
+            photoURL: '',
+            atualizadoEm: serverTimestamp()
+          },
+          { merge: true }
+        );
+      } catch {}
+
+      return { success: true };
+    } catch (err) {
+      console.warn('Erro ao remover foto de perfil:', err);
+      return { success: false, error: 'Erro ao remover foto de perfil.' };
+    }
+  };
+
   // RECARREGAR PERFIL
   const refreshProfile = async () => {
     if (!user) return;
@@ -626,6 +729,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginGuest,
         logout,
         updateBalance,
+        updateProfilePhoto,
+        removeProfilePhoto,
         refreshProfile
       }}
     >

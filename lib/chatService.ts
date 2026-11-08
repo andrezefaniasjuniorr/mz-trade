@@ -38,6 +38,8 @@ export interface GroupMessage {
   editedAt?: any;
   reactions?: Record<string, number>;
   userReactions?: Record<string, string>; // uid -> emoji
+  fotoPerfil?: string;
+  photoURL?: string;
   // Transient state for live upload progress bar inside bubble
   isUploading?: boolean;
   uploadProgress?: number;
@@ -48,6 +50,8 @@ export interface PrivateChatDoc {
   uid: string;
   userName: string;
   userEmail: string;
+  fotoPerfil?: string;
+  photoURL?: string;
   lastMessage: string;
   lastMessageAt: any;
   lastMessageType?: 'text' | 'image' | 'system';
@@ -61,6 +65,8 @@ export interface PrivateMessage {
   uid: string;
   senderName: string;
   senderEmail: string;
+  fotoPerfil?: string;
+  photoURL?: string;
   isAdmin: boolean;
   text: string;
   type: 'text' | 'image' | 'system' | 'audio';

@@ -41,13 +41,18 @@ import {
   Briefcase,
   Coins,
   MessageCircle,
-  UserCheck
+  UserCheck,
+  Camera,
+  Upload,
+  Trash2,
+  Maximize2
 } from 'lucide-react';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, initAnalytics } from '@/src/firebase';
+import { compressProfileImage } from '@/lib/imageUtils';
 import {
   prefetchLatestChatMessages,
   playMessageSound,
@@ -448,7 +453,7 @@ const InteractiveChart = ({
 
   const candles = useMemo(() => {
     return getOrCreateCandles(commodity, activeTimeframe);
-  }, [commodity, commodity.price, commodity.id, activeTimeframe]);
+  }, [commodity, activeTimeframe]);
 
   const handleSetTimeframe = (tf: '1M' | '5M' | '15M' | '1H' | '1D') => {
     setInternalTimeframe(tf);
@@ -876,8 +881,58 @@ const getClockServerSnapshot = () => 0;
 
 export default function Home() {
   const router = useRouter();
-  const { user, userProfile, loading: authLoading, logout, updateBalance, isAdmin } = useAuth();
+  const { user, userProfile, loading: authLoading, logout, updateBalance, updateProfilePhoto, removeProfilePhoto, isAdmin } = useAuth();
   const profile = (userProfile || {}) as any;
+
+  // Foto de Perfil State & Upload Handler
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState<boolean>(false);
+  const [fullscreenPhotoModal, setFullscreenPhotoModal] = useState<{ url: string; name: string } | null>(null);
+  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProfilePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Por favor, selecione uma imagem válida (JPG, PNG, WebP).', 'error');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('A imagem é muito grande. Escolha uma foto de até 10MB.', 'error');
+      return;
+    }
+
+    try {
+      setIsUploadingPhoto(true);
+      showToast('A otimizar e guardar foto de perfil...', 'info');
+      const compressedBase64 = await compressProfileImage(file, 360, 0.82);
+      const res = await updateProfilePhoto(compressedBase64);
+      if (res.success) {
+        showToast('Foto de perfil atualizada com sucesso!', 'success');
+      } else {
+        showToast(res.error || 'Erro ao guardar foto de perfil.', 'error');
+      }
+    } catch (err) {
+      console.error('Erro ao processar foto:', err);
+      showToast('Falha ao processar a imagem. Tente outra foto.', 'error');
+    } finally {
+      setIsUploadingPhoto(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    try {
+      setIsUploadingPhoto(true);
+      const res = await removeProfilePhoto();
+      if (res.success) {
+        showToast('Foto de perfil removida com sucesso.', 'info');
+      }
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   // Pure clock timestamp for cooldown calculations
   const nowMs = useSyncExternalStore(subscribeToClock, getClockSnapshot, getClockServerSnapshot);
@@ -896,7 +951,11 @@ export default function Home() {
     if (asset) {
       setFullscreenAssetId(asset.id);
       if (typeof window !== 'undefined') {
-        window.history.pushState({ modal: 'fullscreen_chart', assetId: asset.id }, '');
+        try {
+          window.history.pushState({ modal: 'fullscreen_chart', assetId: asset.id }, '');
+        } catch {
+          // ignore
+        }
       }
     } else {
       setFullscreenAssetId(null);
@@ -904,14 +963,18 @@ export default function Home() {
   }, []);
   const setFullscreenAsset = openFullscreenAsset;
 
-  const [activeTab, setActiveTabRaw] = useState<'inicio' | 'mercados' | 'carteira' | 'perfil'>('inicio');
+  const [activeTab, setActiveTabState] = useState<'inicio' | 'mercados' | 'carteira' | 'perfil'>('inicio');
   const setActiveTab = useCallback((tab: 'inicio' | 'mercados' | 'carteira' | 'perfil') => {
-    setActiveTabRaw((prev) => {
-      if (prev !== tab && typeof window !== 'undefined') {
-        window.history.pushState({ tab }, '', `#${tab}`);
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      try {
+        if (window.location.hash !== `#${tab}`) {
+          window.history.pushState({ tab }, '', `#${tab}`);
+        }
+      } catch {
+        // ignore
       }
-      return tab;
-    });
+    }
   }, []);
 
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
@@ -1105,13 +1168,13 @@ export default function Home() {
       }
 
       if (e.state && e.state.tab) {
-        setActiveTabRaw(e.state.tab);
+        setActiveTabState(e.state.tab);
       } else {
         const hash = window.location.hash.replace('#', '');
         if (['inicio', 'mercados', 'carteira', 'perfil'].includes(hash)) {
-          setActiveTabRaw(hash as any);
+          setActiveTabState(hash as any);
         } else {
-          setActiveTabRaw('inicio');
+          setActiveTabState('inicio');
         }
       }
     };
@@ -1154,7 +1217,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!authLoading && !user) {
-      router.push('/login');
+      router.replace('/login');
     }
   }, [user, authLoading, router]);
 
@@ -1898,14 +1961,22 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setActiveTab('perfil')}
-              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0 ${
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-300 transition cursor-pointer shrink-0 overflow-hidden ${
                 activeTab === 'perfil'
                   ? 'bg-blue-700 text-white ring-2 ring-blue-400'
                   : 'bg-[#2563eb] text-white'
               }`}
               title="Perfil do Investidor"
             >
-              {profile?.nome ? profile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')}
+              {profile?.fotoPerfil || profile?.photoURL ? (
+                <img
+                  src={profile.fotoPerfil || profile.photoURL}
+                  alt={profile?.nome || 'Perfil'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                profile?.nome ? profile.nome.charAt(0).toUpperCase() : (user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'A')
+              )}
             </button>
 
             {/* 4. CHAT LINK */}
@@ -3392,9 +3463,89 @@ export default function Home() {
           {activeTab === 'perfil' && (
             <div className="space-y-6 max-w-2xl mx-auto">
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center space-y-3">
-                <div className="w-20 h-20 rounded-full bg-blue-600 text-white font-black text-2xl flex items-center justify-center mx-auto shadow-lg shadow-blue-200">
-                  {profile?.nome ? profile.nome.charAt(0).toUpperCase() : 'U'}
+                {/* Input de ficheiro oculto para seleção da foto */}
+                <input
+                  type="file"
+                  ref={profilePhotoInputRef}
+                  onChange={handleProfilePhotoSelect}
+                  accept="image/png,image/jpeg,image/webp,image/jpg"
+                  className="hidden"
+                />
+
+                {/* Avatar com suporte a Foto e Inicial */}
+                <div className="relative w-24 h-24 mx-auto group">
+                  {profile?.fotoPerfil || profile?.photoURL ? (
+                    <img
+                      src={profile.fotoPerfil || profile.photoURL}
+                      alt={profile?.nome || 'Foto de Perfil'}
+                      onClick={() => setFullscreenPhotoModal({ url: profile.fotoPerfil || profile.photoURL, name: profile?.nome || 'Minha Foto' })}
+                      className="w-24 h-24 rounded-full object-cover shadow-lg shadow-blue-200 border-3 border-blue-600 cursor-pointer hover:opacity-95 transition"
+                      title="Clique para ver a foto em tamanho grande"
+                    />
+                  ) : (
+                    <div
+                      onClick={() => profilePhotoInputRef.current?.click()}
+                      className="w-24 h-24 rounded-full bg-blue-600 text-white font-black text-3xl flex items-center justify-center shadow-lg shadow-blue-200 cursor-pointer hover:bg-blue-700 transition"
+                      title="Clique para adicionar foto de perfil"
+                    >
+                      {profile?.nome ? profile.nome.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                  )}
+
+                  {/* Botão de câmara para alterar/adicionar foto */}
+                  <button
+                    type="button"
+                    onClick={() => profilePhotoInputRef.current?.click()}
+                    disabled={isUploadingPhoto}
+                    className="absolute bottom-0 right-0 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-md border-2 border-white transition cursor-pointer hover:scale-105 active:scale-95 disabled:opacity-50"
+                    title="Adicionar ou alterar foto de perfil"
+                  >
+                    {isUploadingPhoto ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                  </button>
                 </div>
+
+                {/* Ações da Foto de Perfil */}
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => profilePhotoInputRef.current?.click()}
+                    disabled={isUploadingPhoto}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Upload className="w-3 h-3 text-blue-600" />
+                    <span>{profile?.fotoPerfil || profile?.photoURL ? 'Trocar Foto' : 'Adicionar Foto'}</span>
+                  </button>
+
+                  {(profile?.fotoPerfil || profile?.photoURL) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setFullscreenPhotoModal({ url: profile.fotoPerfil || profile.photoURL, name: profile?.nome || 'Minha Foto' })}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+                        title="Ver foto em tamanho inteiro"
+                      >
+                        <Maximize2 className="w-3 h-3" />
+                        <span>Ver</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        disabled={isUploadingPhoto}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl transition cursor-pointer disabled:opacity-50"
+                        title="Remover foto de perfil"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Remover</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">
                     {profile?.nome || 'Utilizador Moçambicano'}
@@ -4374,6 +4525,62 @@ export default function Home() {
             >
               Compreendi, Voltar à Carteira
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISUALIZAÇÃO DE FOTO DE PERFIL EM TAMANHO GRANDE */}
+      {fullscreenPhotoModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setFullscreenPhotoModal(null)}
+        >
+          <div
+            className="relative max-w-sm sm:max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-4 sm:p-5 flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                <h4 className="text-sm font-bold text-white truncate">{fullscreenPhotoModal.name}</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFullscreenPhotoModal(null)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="w-full aspect-square max-w-[320px] max-h-[320px] my-4 rounded-2xl overflow-hidden border border-slate-800 bg-black flex items-center justify-center shadow-inner">
+              <img
+                src={fullscreenPhotoModal.url}
+                alt={fullscreenPhotoModal.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            <div className="w-full flex items-center justify-between gap-2 pt-2 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setFullscreenPhotoModal(null);
+                  profilePhotoInputRef.current?.click();
+                }}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition cursor-pointer text-center"
+              >
+                Alterar Esta Foto
+              </button>
+              <button
+                type="button"
+                onClick={() => setFullscreenPhotoModal(null)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

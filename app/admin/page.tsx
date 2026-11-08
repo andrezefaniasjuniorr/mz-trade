@@ -112,6 +112,8 @@ interface UserRecord {
   hasDeposited?: boolean;
   totalDeposits?: number;
   primeiroDepositoEm?: any;
+  fotoPerfil?: string;
+  photoURL?: string;
 }
 
 interface CommodityConfig {
@@ -244,6 +246,7 @@ export default function AdminPage() {
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [userSearch, setUserSearch] = useState<string>('');
   const [filterZeroBalance, setFilterZeroBalance] = useState<boolean>(false);
+  const [viewingUserPhoto, setViewingUserPhoto] = useState<{ url: string; name: string } | null>(null);
 
   // Levantamentos (M-Pesa / e-Mola)
   const [adminWithdrawals, setAdminWithdrawals] = useState<WithdrawalAdminRecord[]>(() => {
@@ -516,7 +519,9 @@ export default function AdminPage() {
           indicadosCount: d.indicadosCount || 0,
           hasDeposited: d.hasDeposited !== undefined ? !!d.hasDeposited : (d.totalDeposits > 0 || !!d.primeiroDepositoEm || (!!d.ultimoCreditoEm && saldoDisp > 0)),
           totalDeposits: d.totalDeposits || 0,
-          primeiroDepositoEm: d.primeiroDepositoEm
+          primeiroDepositoEm: d.primeiroDepositoEm,
+          fotoPerfil: d.fotoPerfil || d.photoURL || '',
+          photoURL: d.photoURL || d.fotoPerfil || ''
         });
       });
       users.sort((a, b) => {
@@ -570,7 +575,9 @@ export default function AdminPage() {
               indicadosCount: d.indicadosCount || existing?.indicadosCount || 0,
               hasDeposited: d.hasDeposited !== undefined ? !!d.hasDeposited : (existing?.hasDeposited ?? (d.totalDeposits > 0 || !!d.primeiroDepositoEm || (!!d.ultimoCreditoEm && saldoDisp > 0))),
               totalDeposits: d.totalDeposits || existing?.totalDeposits || 0,
-              primeiroDepositoEm: d.primeiroDepositoEm || existing?.primeiroDepositoEm
+              primeiroDepositoEm: d.primeiroDepositoEm || existing?.primeiroDepositoEm,
+              fotoPerfil: d.fotoPerfil || d.photoURL || existing?.fotoPerfil || '',
+              photoURL: d.photoURL || d.fotoPerfil || existing?.photoURL || ''
             });
           });
           const merged = Array.from(map.values());
@@ -2434,15 +2441,6 @@ export default function AdminPage() {
             </div>
           </div>
         )}
-        Aqui está a Parte 3 de 3 do Arquivo 4: app/admin/page.tsx (100% completa, sem
-omissões).
-
-Cole este bloco imediatamente abaixo do final da Parte 2 para concluir o arquivo
-perfeitamente.
-
-ARQUIVO 4 (PARTE 3 DE 3): app/admin/page.tsx
-
-(Cole exatamente após o fechamento da Aba 1 da Parte 2 até o fim)
 
         {/* ======================================================== */}
         {/* ABA 2: GESTÃO DE USUÁRIOS & ATRIBUIÇÃO DE SALDO */}
@@ -2527,9 +2525,19 @@ ARQUIVO 4 (PARTE 3 DE 3): app/admin/page.tsx
                           <tr key={u.id} className="hover:bg-[#0a1020]/50 transition group">
                             <td className="py-3.5 px-4 font-bold text-slate-100">
                               <div className="flex items-center space-x-3">
-                                <div className="w-9 h-9 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 font-black flex items-center justify-center shrink-0 text-sm shadow-inner">
-                                  {u.nome?.charAt(0).toUpperCase() || 'U'}
-                                </div>
+                                {u.fotoPerfil || u.photoURL ? (
+                                  <img
+                                    src={u.fotoPerfil || u.photoURL}
+                                    alt={u.nome || 'Investidor'}
+                                    onClick={() => setViewingUserPhoto({ url: u.fotoPerfil || u.photoURL || '', name: u.nome || 'Investidor' })}
+                                    className="w-9 h-9 rounded-xl object-cover shrink-0 cursor-pointer border border-blue-500/40 hover:scale-105 active:scale-95 transition shadow-xs"
+                                    title="Clique para ampliar foto de perfil"
+                                  />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 font-black flex items-center justify-center shrink-0 text-sm shadow-inner">
+                                    {u.nome?.charAt(0).toUpperCase() || 'U'}
+                                  </div>
+                                )}
                                 <div className="min-w-0">
                                   <span className="block truncate font-bold text-white group-hover:text-blue-300 transition">
                                     {u.nome || 'Investidor Sem Nome'}
@@ -4500,6 +4508,50 @@ ARQUIVO 4 (PARTE 3 DE 3): app/admin/page.tsx
           if (!isDeletingChatMsg) setChatMsgToDelete(null);
         }}
       />
+
+      {/* Modal para Visualização de Foto de Perfil do Usuário */}
+      {viewingUserPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setViewingUserPhoto(null)}
+        >
+          <div
+            className="relative max-w-sm sm:max-w-md w-full bg-[#111a2e] border border-[#1e293b] rounded-3xl overflow-hidden shadow-2xl p-5 flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-[#1e293b]">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                <h4 className="text-sm font-bold text-white truncate">Foto de {viewingUserPhoto.name}</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingUserPhoto(null)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="w-full aspect-square max-w-[320px] max-h-[320px] my-4 rounded-2xl overflow-hidden border border-[#1e293b] bg-black flex items-center justify-center shadow-inner">
+              <img
+                src={viewingUserPhoto.url}
+                alt={viewingUserPhoto.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setViewingUserPhoto(null)}
+              className="w-full py-2.5 bg-[#1e293b] hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition cursor-pointer"
+            >
+              Fechar Visualização
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
