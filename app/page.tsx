@@ -1043,16 +1043,49 @@ export default function Home() {
     setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
-  // Background Chat Messages Listener with Audio Chime & Push Notification
+  // Contador de mensagens não lidas no Chat (Badge 1, 2, 3...)
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+
+  // Monitorização de mensagens não lidas e notificações em tempo real
   useEffect(() => {
     let isInitialMount = true;
     const messagesRef = collection(db, 'taprise_group_messages');
-    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(1));
+    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(50));
+
+    const calculateUnread = (docs: any[]) => {
+      const lastReadTime = typeof window !== 'undefined'
+        ? Number(localStorage.getItem('taprise_last_read_group_time') || 0)
+        : 0;
+
+      let count = 0;
+      for (const docSnap of docs) {
+        const d = docSnap.data();
+        if (d.uid === user?.uid) continue;
+        const msgTime = d.createdAt?.toMillis
+          ? d.createdAt.toMillis()
+          : (d.createdAt?.seconds ? d.createdAt.seconds * 1000 : 0);
+
+        if (lastReadTime === 0 || msgTime > lastReadTime) {
+          count++;
+        }
+      }
+      return count;
+    };
+
+    let latestDocs: any[] = [];
 
     const unsub = onSnapshot(
       q,
       (snapshot) => {
-        if (snapshot.empty) return;
+        if (snapshot.empty) {
+          setUnreadChatCount(0);
+          return;
+        }
+
+        latestDocs = snapshot.docs;
+        const unreadCount = calculateUnread(snapshot.docs);
+        setUnreadChatCount(unreadCount);
+
         const latestDoc = snapshot.docs[0];
         const d = latestDoc.data();
         const msgId = latestDoc.id;
@@ -1077,7 +1110,23 @@ export default function Home() {
       (err) => console.warn('Erro ao escutar mensagens do chat em segundo plano:', err)
     );
 
-    return () => unsub();
+    const handleSync = () => {
+      if (latestDocs.length > 0) {
+        setUnreadChatCount(calculateUnread(latestDocs));
+      } else {
+        const lastReadTime = Number(localStorage.getItem('taprise_last_read_group_time') || 0);
+        if (lastReadTime > 0) setUnreadChatCount(0);
+      }
+    };
+
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      unsub();
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, [user?.uid, showToast]);
 
   const selectedAsset = useMemo(() => {
@@ -1979,7 +2028,7 @@ export default function Home() {
               )}
             </button>
 
-            {/* 4. CHAT LINK */}
+            {/* 4. CHAT LINK COM BADGE DE NÃO LIDAS */}
             <Link
               href="/chat"
               prefetch={true}
@@ -1987,7 +2036,13 @@ export default function Home() {
               title="Grupo de Chat Ao Vivo"
             >
               <MessageCircle className="w-3.5 h-3.5 text-slate-700" />
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+              {unreadChatCount > 0 ? (
+                <span className="absolute -top-1 -right-1 px-1 py-0.5 bg-emerald-500 text-white font-black text-[9px] rounded-full min-w-[15px] h-[15px] flex items-center justify-center shadow-md leading-none animate-in zoom-in-50">
+                  {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                </span>
+              ) : (
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+              )}
             </Link>
 
             {isAdmin && (
@@ -2157,7 +2212,13 @@ export default function Home() {
                   <MessageSquare className="w-4 h-4 shrink-0 text-blue-600" />
                   <span>Grupo Ao Vivo</span>
                 </div>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                {unreadChatCount > 0 ? (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-500 text-white shadow-xs">
+                    {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                  </span>
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                )}
               </Link>
             </div>
 
@@ -3773,7 +3834,13 @@ export default function Home() {
         >
           <div className="relative p-1 rounded-lg">
             <MessageCircle className="w-5 h-5 text-slate-600" />
-            <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+            {unreadChatCount > 0 ? (
+              <span className="absolute -top-1 -right-2 px-1.5 py-0.5 bg-emerald-500 text-white font-black text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center shadow-md animate-in zoom-in-50 leading-none">
+                {unreadChatCount > 99 ? '99+' : unreadChatCount}
+              </span>
+            ) : (
+              <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+            )}
           </div>
           <span className="text-[10px] mt-0.5 leading-none font-medium">Chat</span>
         </Link>

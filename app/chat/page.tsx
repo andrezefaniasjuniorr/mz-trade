@@ -948,6 +948,8 @@ export default function ChatPage() {
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialMountRef = useRef<boolean>(true);
   const lastSeenGroupMsgIdRef = useRef<string | null>(null);
+  const [firstUnreadMsgId, setFirstUnreadMsgId] = useState<string | null>(null);
+  const initialAutoScrollDoneRef = useRef<boolean>(false);
 
   // Hardware Mobile Back Button listener
   useEffect(() => {
@@ -1107,15 +1109,60 @@ export default function ChatPage() {
           lastSeenGroupMsgIdRef.current = list[list.length - 1].id;
         }
 
-        const container = chatContainerRef.current;
-        if (container) {
-          const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
-          if (isNearBottom) {
+        // =========================================================================
+        // SCROLL AUTOMÁTICO INTELIGENTE AO ENTRAR NO CHAT:
+        // - Se HÁ mensagens novas não lidas: posiciona automaticamente na 1ª mensagem não lida
+        // - Se NÃO HÁ mensagens novas: posiciona imediatamente na última mensagem (em baixo)
+        // =========================================================================
+        if (!initialAutoScrollDoneRef.current && list.length > 0) {
+          initialAutoScrollDoneRef.current = true;
+
+          const lastReadTime = typeof window !== 'undefined'
+            ? Number(localStorage.getItem('taprise_last_read_group_time') || 0)
+            : 0;
+
+          let targetUnreadMsg: GroupMessage | null = null;
+          if (lastReadTime > 0) {
+            for (let idx = 0; idx < list.length; idx++) {
+              const m = list[idx];
+              const mTime = m.createdAt?.toMillis
+                ? m.createdAt.toMillis()
+                : (m.createdAt?.seconds ? m.createdAt.seconds * 1000 : 0);
+
+              if (mTime > lastReadTime && m.uid !== user?.uid) {
+                targetUnreadMsg = m;
+                break;
+              }
+            }
+          }
+
+          if (targetUnreadMsg) {
+            setFirstUnreadMsgId(targetUnreadMsg.id);
             setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-            }, 60);
+              const el = document.getElementById(`msg-${targetUnreadMsg.id}`) || document.getElementById('unread-divider');
+              if (el) {
+                el.scrollIntoView({ behavior: 'auto', block: 'start' });
+              } else {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+              }
+            }, 80);
           } else {
-            setShowScrollBottomBtn(true);
+            setFirstUnreadMsgId(null);
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            }, 80);
+          }
+        } else if (list.length > 0) {
+          const container = chatContainerRef.current;
+          if (container) {
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
+            if (isNearBottom) {
+              setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }, 60);
+            } else {
+              setShowScrollBottomBtn(true);
+            }
           }
         }
       },
@@ -1127,6 +1174,32 @@ export default function ChatPage() {
 
     return () => unsubscribe();
   }, [user?.uid]);
+
+  // Marca mensagens do grupo como lidas após visualização e ao sair
+  useEffect(() => {
+    if (messages.length > 0) {
+      const timer = setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          const newest = messages[messages.length - 1];
+          const newestTime = newest?.createdAt?.toMillis
+            ? newest.createdAt.toMillis()
+            : (newest?.createdAt?.seconds ? newest.createdAt.seconds * 1000 : Date.now());
+          localStorage.setItem('taprise_last_read_group_time', String(newestTime || Date.now()));
+          window.dispatchEvent(new Event('storage'));
+        }
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('taprise_last_read_group_time', String(Date.now()));
+        window.dispatchEvent(new Event('storage'));
+      }
+    };
+  }, []);
 
   // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat)
   useEffect(() => {
@@ -2499,6 +2572,15 @@ export default function ChatPage() {
 
                 return (
                   <React.Fragment key={msg.id}>
+                    {msg.id === firstUnreadMsgId && (
+                      <div id="unread-divider" className="flex items-center justify-center my-4 py-1">
+                        <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-blue-950/90 border border-blue-500/40 text-blue-300 text-[11px] font-bold shadow-md">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                          <span>Mensagens não lidas</span>
+                        </div>
+                      </div>
+                    )}
+
                     {showDateSeparator && (
                       <div className="flex items-center justify-center my-3">
                         <span className="px-3 py-0.5 bg-slate-900 border border-slate-800 text-slate-400 rounded-full text-[10px] font-bold shadow-xs">
