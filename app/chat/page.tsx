@@ -921,8 +921,9 @@ export default function ChatPage() {
     time?: string;
   }>({ isOpen: false, url: null });
 
-  // --- GRAVAÇÃO DE ÁUDIO (ATÉ 01:30 MÁX, 48000Hz, 64kbps) ---
+  // --- GRAVAÇÃO DE ÁUDIO (ATÉ 01:30 MÁX, 64kbps, COMPATÍVEL COM TELEMÓVEIS) ---
   const [showMicPermissionModal, setShowMicPermissionModal] = useState<boolean>(false);
+  const [showMicBlockedModal, setShowMicBlockedModal] = useState<boolean>(false);
   const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
   const [recordingDuration, setRecordingDuration] = useState<number>(0);
   const [recordingTarget, setRecordingTarget] = useState<'group' | 'private'>('group');
@@ -953,6 +954,10 @@ export default function ChatPage() {
     const handlePopState = () => {
       if (showMicPermissionModal) {
         setShowMicPermissionModal(false);
+        return;
+      }
+      if (showMicBlockedModal) {
+        setShowMicBlockedModal(false);
         return;
       }
       if (isRecordingAudio) {
@@ -994,7 +999,7 @@ export default function ChatPage() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [lightboxData.isOpen, pendingImage, adminSelectedUserId, activeSegment, showMicPermissionModal, isRecordingAudio, router]);
+  }, [lightboxData.isOpen, pendingImage, adminSelectedUserId, activeSegment, showMicPermissionModal, showMicBlockedModal, isRecordingAudio, router]);
 
   // Toast
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -1676,34 +1681,66 @@ export default function ChatPage() {
 
   const startAudioRecording = useCallback(async (target: 'group' | 'private') => {
     try {
-      // Qualidade: webm/opus, 48000Hz, 64kbps, echoCancellation, noiseSuppression, sem distorção
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+      // 1. Verifica contexto de segurança (HTTPS exigido por navegadores de telemóvel)
+      if (typeof window !== 'undefined' && !window.isSecureContext && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+        showToast('A gravação de áudio requer conexão segura HTTPS.', 'error');
+        return;
+      }
+
+      // 2. Tentativa com filtros avançados (sem forçar sampleRate fixo que quebra DACs de telemóveis)
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      } catch (firstErr: any) {
+        console.warn('Tentativa com filtros de áudio falhou, recorrendo a fallback universal:', firstErr);
+        // Fallback universal: áudio básico compatível com 100% dos telemóveis
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (secondErr: any) {
+          throw secondErr;
         }
-      });
+      }
+
+      if (!stream) {
+        throw new Error('Não foi possível inicializar o microfone.');
+      }
+
+      // Sucesso: marca como permitido localmente para agilizar próximos envios
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('taprise_mic_allowed', 'true');
+      }
 
       audioStreamRef.current = stream;
       audioChunksRef.current = [];
 
-      const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-        ? 'audio/ogg;codecs=opus'
-        : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
-        ? 'audio/mp4'
-        : '';
+      // Seleção flexível de MIME type suportado pelo telemóvel (Android / iOS / Desktop)
+      let mimeType = '';
+      if (typeof MediaRecorder !== 'undefined') {
+        const candidateTypes = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+          'audio/ogg;codecs=opus'
+        ];
+        for (const t of candidateTypes) {
+          if (MediaRecorder.isTypeSupported(t)) {
+            mimeType = t;
+            break;
+          }
+        }
+      }
 
-      const recorder = new MediaRecorder(stream, {
-        mimeType: mimeType || undefined,
-        audioBitsPerSecond: 64000
-      });
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType, audioBitsPerSecond: 64000 } : undefined
+      );
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -1734,16 +1771,34 @@ export default function ChatPage() {
 
     } catch (err: any) {
       console.warn('Erro ao aceder ao microfone:', err);
-      showToast('Acesso ao microfone não concedido.', 'error');
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('taprise_mic_allowed');
+      }
       cancelAudioRecording();
+
+      const errName = err?.name || '';
+      const errMsg = err?.message || '';
+
+      if (
+        errName === 'NotAllowedError' ||
+        errName === 'PermissionDeniedError' ||
+        errName === 'SecurityError' ||
+        errMsg.toLowerCase().includes('denied') ||
+        errMsg.toLowerCase().includes('not allowed') ||
+        errMsg.toLowerCase().includes('permission') ||
+        errMsg.toLowerCase().includes('dismissed')
+      ) {
+        setShowMicBlockedModal(true);
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        showToast('Nenhum microfone encontrado neste telemóvel.', 'error');
+      } else {
+        showToast('Não foi possível ativar o microfone.', 'error');
+      }
     }
   }, [showToast, cancelAudioRecording, stopAndSendAudio]);
 
   const handleConfirmMicPermission = useCallback(async () => {
     setShowMicPermissionModal(false);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('taprise_mic_allowed', 'true');
-    }
     await startAudioRecording(recordingTarget);
   }, [recordingTarget, startAudioRecording]);
 
@@ -1755,7 +1810,7 @@ export default function ChatPage() {
     }
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      showToast('O seu navegador não suporta gravação de áudio.', 'error');
+      showToast('O seu navegador não suporta gravação ou requer conexão HTTPS.', 'error');
       return;
     }
 
@@ -2225,7 +2280,6 @@ export default function ChatPage() {
       />
 
       {/* MODAL DE PERMISSÃO DE MICROFONE PROFISSIONAL (NUNCA MOSTRA LINKS/URLS) */}
-      {/* MODAL DE PERMISSÃO DE MICROFONE PROFISSIONAL (NUNCA MOSTRA LINKS/URLS) */}
       <TapRiseModal
         isOpen={showMicPermissionModal}
         title="Permitir acesso ao microfone"
@@ -2236,6 +2290,22 @@ export default function ChatPage() {
         onCancel={() => setShowMicPermissionModal(false)}
         variant="primary"
         icon={<Mic className="w-6 h-6 text-blue-400" />}
+      />
+
+      {/* MODAL DE AJUDA QUANDO O MICROFONE ESTÁ BLOQUEADO NO TELEMÓVEL */}
+      <TapRiseModal
+        isOpen={showMicBlockedModal}
+        title="Microfone Bloqueado no Telemóvel"
+        description="O navegador bloqueou o acesso ao microfone. Para desbloquear: toque no ícone de opções ou cadeado ao lado da barra de endereço, abra 'Definições do Site' ou 'Permissões', selecione 'Microfone' e mude para 'Permitir'."
+        confirmText="Tentar Novamente"
+        cancelText="Fechar"
+        onConfirm={() => {
+          setShowMicBlockedModal(false);
+          startAudioRecording(recordingTarget);
+        }}
+        onCancel={() => setShowMicBlockedModal(false)}
+        variant="primary"
+        icon={<Mic className="w-6 h-6 text-amber-400" />}
       />
 
       {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE MENSAGEM */}
