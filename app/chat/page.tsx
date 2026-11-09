@@ -1024,6 +1024,34 @@ export default function ChatPage() {
     });
   }, []);
 
+  // Função de auto-scroll direta no container e elementos
+  const performAutoScroll = useCallback((targetId?: string | null) => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    if (targetId) {
+      const el = document.getElementById(`msg-${targetId}`) || document.getElementById('unread-divider');
+      if (el) {
+        el.scrollIntoView({ behavior: 'auto', block: 'start' });
+        const cRect = container.getBoundingClientRect();
+        const tRect = el.getBoundingClientRect();
+        container.scrollTop = container.scrollTop + (tRect.top - cRect.top) - 16;
+        return;
+      }
+    }
+
+    container.scrollTop = container.scrollHeight;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+  }, []);
+
+  const scheduleSmartScroll = useCallback((targetId?: string | null) => {
+    performAutoScroll(targetId);
+    setTimeout(() => performAutoScroll(targetId), 40);
+    setTimeout(() => performAutoScroll(targetId), 140);
+    setTimeout(() => performAutoScroll(targetId), 280);
+    setTimeout(() => performAutoScroll(targetId), 500);
+  }, [performAutoScroll]);
+
   // 1. CARREGAMENTO DO GRUPO (Últimas 50 mensagens em tempo real)
   useEffect(() => {
     const messagesRef = collection(db, 'taprise_group_messages');
@@ -1111,25 +1139,38 @@ export default function ChatPage() {
 
         // =========================================================================
         // SCROLL AUTOMÁTICO INTELIGENTE AO ENTRAR NO CHAT:
-        // - Se HÁ mensagens novas não lidas: posiciona automaticamente na 1ª mensagem não lida
-        // - Se NÃO HÁ mensagens novas: posiciona imediatamente na última mensagem (em baixo)
+        // - Se HÁ mensagens novas não lidas: posiciona na 1ª mensagem não lida
+        // - Se NÃO HÁ mensagens novas: posiciona imediatamente na última mensagem
         // =========================================================================
         if (!initialAutoScrollDoneRef.current && list.length > 0) {
           initialAutoScrollDoneRef.current = true;
 
-          const lastReadTime = typeof window !== 'undefined'
-            ? Number(localStorage.getItem('taprise_last_read_group_time') || 0)
+          const lastSeenId = typeof window !== 'undefined'
+            ? localStorage.getItem('taprise_last_seen_msg_id')
+            : null;
+          const lastSeenTime = typeof window !== 'undefined'
+            ? Number(localStorage.getItem('taprise_last_seen_msg_time') || localStorage.getItem('taprise_last_read_group_time') || 0)
             : 0;
 
           let targetUnreadMsg: GroupMessage | null = null;
-          if (lastReadTime > 0) {
+          if (lastSeenId) {
+            const seenIdx = list.findIndex((m) => m.id === lastSeenId);
+            if (seenIdx !== -1 && seenIdx < list.length - 1) {
+              for (let i = seenIdx + 1; i < list.length; i++) {
+                if (list[i].uid !== user?.uid) {
+                  targetUnreadMsg = list[i];
+                  break;
+                }
+              }
+            }
+          } else if (lastSeenTime > 0) {
             for (let idx = 0; idx < list.length; idx++) {
               const m = list[idx];
               const mTime = m.createdAt?.toMillis
                 ? m.createdAt.toMillis()
                 : (m.createdAt?.seconds ? m.createdAt.seconds * 1000 : 0);
 
-              if (mTime > lastReadTime && m.uid !== user?.uid) {
+              if (mTime > lastSeenTime && m.uid !== user?.uid) {
                 targetUnreadMsg = m;
                 break;
               }
@@ -1138,28 +1179,20 @@ export default function ChatPage() {
 
           if (targetUnreadMsg) {
             setFirstUnreadMsgId(targetUnreadMsg.id);
-            setTimeout(() => {
-              const el = document.getElementById(`msg-${targetUnreadMsg.id}`) || document.getElementById('unread-divider');
-              if (el) {
-                el.scrollIntoView({ behavior: 'auto', block: 'start' });
-              } else {
-                messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-              }
-            }, 80);
+            scheduleSmartScroll(targetUnreadMsg.id);
           } else {
             setFirstUnreadMsgId(null);
-            setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            }, 80);
+            scheduleSmartScroll(null);
           }
         } else if (list.length > 0) {
           const container = chatContainerRef.current;
           if (container) {
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 240;
             if (isNearBottom) {
               setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
                 messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-              }, 60);
+              }, 50);
             } else {
               setShowScrollBottomBtn(true);
             }
@@ -1173,33 +1206,55 @@ export default function ChatPage() {
     );
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, scheduleSmartScroll]);
 
-  // Marca mensagens do grupo como lidas após visualização e ao sair
+  // Scroll inicial imediato para mensagens em cache local
+  useEffect(() => {
+    if (!initialAutoScrollDoneRef.current && messages.length > 0) {
+      const lastSeenId = typeof window !== 'undefined'
+        ? localStorage.getItem('taprise_last_seen_msg_id')
+        : null;
+
+      let targetId: string | null = null;
+      if (lastSeenId) {
+        const seenIdx = messages.findIndex((m) => m.id === lastSeenId);
+        if (seenIdx !== -1 && seenIdx < messages.length - 1) {
+          for (let i = seenIdx + 1; i < messages.length; i++) {
+            if (messages[i].uid !== user?.uid) {
+              targetId = messages[i].id;
+              break;
+            }
+          }
+        }
+      }
+
+      if (targetId) {
+        setFirstUnreadMsgId(targetId);
+      }
+      scheduleSmartScroll(targetId);
+    }
+  }, [messages, user?.uid, scheduleSmartScroll]);
+
+  // Marca mensagens do grupo como lidas após visualização ativa
   useEffect(() => {
     if (messages.length > 0) {
       const timer = setTimeout(() => {
         if (typeof window !== 'undefined') {
           const newest = messages[messages.length - 1];
-          const newestTime = newest?.createdAt?.toMillis
-            ? newest.createdAt.toMillis()
-            : (newest?.createdAt?.seconds ? newest.createdAt.seconds * 1000 : Date.now());
-          localStorage.setItem('taprise_last_read_group_time', String(newestTime || Date.now()));
-          window.dispatchEvent(new Event('storage'));
+          if (newest) {
+            const newestTime = newest?.createdAt?.toMillis
+              ? newest.createdAt.toMillis()
+              : (newest?.createdAt?.seconds ? newest.createdAt.seconds * 1000 : Date.now());
+            localStorage.setItem('taprise_last_seen_msg_id', newest.id);
+            localStorage.setItem('taprise_last_seen_msg_time', String(newestTime));
+            localStorage.setItem('taprise_last_read_group_time', String(newestTime));
+            window.dispatchEvent(new Event('storage'));
+          }
         }
       }, 2000);
       return () => clearTimeout(timer);
     }
   }, [messages]);
-
-  useEffect(() => {
-    return () => {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('taprise_last_read_group_time', String(Date.now()));
-        window.dispatchEvent(new Event('storage'));
-      }
-    };
-  }, []);
 
   // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat)
   useEffect(() => {

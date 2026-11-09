@@ -51,7 +51,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { db, initAnalytics } from '@/src/firebase';
+import { db, initAnalytics } from '@/lib/firebase';
 import { compressProfileImage } from '@/lib/imageUtils';
 import {
   prefetchLatestChatMessages,
@@ -1053,19 +1053,32 @@ export default function Home() {
     const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(50));
 
     const calculateUnread = (docs: any[]) => {
-      const lastReadTime = typeof window !== 'undefined'
-        ? Number(localStorage.getItem('taprise_last_read_group_time') || 0)
-        : 0;
+      if (typeof window === 'undefined' || !docs || docs.length === 0) return 0;
+
+      const lastSeenId = localStorage.getItem('taprise_last_seen_msg_id');
+      const lastSeenTime = Number(localStorage.getItem('taprise_last_seen_msg_time') || localStorage.getItem('taprise_last_read_group_time') || 0);
+
+      // Primeira visita sem registos prévios: não exibe badge falso
+      if (!lastSeenId && lastSeenTime === 0) {
+        return 0;
+      }
 
       let count = 0;
       for (const docSnap of docs) {
+        if (lastSeenId && docSnap.id === lastSeenId) {
+          break;
+        }
+
         const d = docSnap.data();
-        if (d.uid === user?.uid) continue;
+        if (user?.uid && d.uid === user.uid) continue;
+
         const msgTime = d.createdAt?.toMillis
           ? d.createdAt.toMillis()
           : (d.createdAt?.seconds ? d.createdAt.seconds * 1000 : 0);
 
-        if (lastReadTime === 0 || msgTime > lastReadTime) {
+        if (lastSeenId) {
+          count++;
+        } else if (lastSeenTime > 0 && msgTime > lastSeenTime) {
           count++;
         }
       }

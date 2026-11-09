@@ -114,7 +114,7 @@ export function playMessageSound() {
   }
 }
 
-// Native System Notification Helper (WhatsApp style notification on mobile & desktop)
+// Native System Notification Helper (Mobile & Desktop)
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'denied';
@@ -474,7 +474,7 @@ export async function uploadChatAudio(
 }
 
 // ========================================================
-// OFFLINE-FIRST LOCAL STORAGE PERSISTENCE (WHATSAPP STYLE)
+// OFFLINE-FIRST LOCAL STORAGE PERSISTENCE
 // ========================================================
 
 const STORAGE_KEYS = {
