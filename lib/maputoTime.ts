@@ -40,6 +40,7 @@ let isSyncingServerTime = false;
  * tornando todo o sistema imune a alterações manuais de data/hora no celular ou computador.
  */
 export async function syncServerTime(): Promise<number> {
+  if (typeof window === 'undefined') return 0;
   if (isSyncingServerTime) return serverTimeOffsetMs;
   isSyncingServerTime = true;
   const t0 = Date.now();

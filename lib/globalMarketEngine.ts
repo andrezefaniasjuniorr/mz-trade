@@ -161,8 +161,19 @@ function hashString(str: string): number {
 }
 
 /**
+ * Gerador pseudo-aleatório determinístico de 32-bit (Mulberry32).
+ * Retorna um número no intervalo [0, 1) baseado em uma seed e um salt.
+ */
+function pseudoRand(seed: number, salt = 0): number {
+  let t = (seed + salt * 0x6D2B79F5) ^ 0x85EBCA6B;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/**
  * Avalia o preço determinístico do ativo para um segundo específico do dia em Maputo.
- * Garante que qualquer usuário no mesmo segundo veja exatamente o mesmo centavo.
+ * Utiliza frequências incomensuráveis e passeios fractais sem qualquer repetição ou loop sinusoidal.
  */
 export function calculateDeterministicPrice(
   spec: CommoditySpec,
@@ -171,23 +182,29 @@ export function calculateDeterministicPrice(
 ): number {
   const seed = hashString(`${spec.symbol}_${dateStr}`);
   
-  // Parâmetros fixos diários do ativo baseados no seed do dia
-  const dailyDrift = (((seed % 600) - 275) / 10000); // Ex: -2.75% a +3.25% no dia
+  // Parâmetros do ativo baseados na seed diária
+  const dailyDrift = (((seed % 800) - 380) / 10000); // Ex: -3.8% a +4.2% no dia
   const phase1 = ((seed >> 2) % 628) / 100;
   const phase2 = ((seed >> 5) % 628) / 100;
   const phase3 = ((seed >> 8) % 628) / 100;
   const phase4 = ((seed >> 11) % 628) / 100;
+  const phase5 = ((seed >> 14) % 628) / 100;
 
-  // Ondas harmônicas contínuas de Fourier (independem de sessão de usuário)
-  const wave1 = Math.sin((secOfDay / 10800) * 2 * Math.PI + phase1) * 0.016; // Ciclo 3h
-  const wave2 = Math.cos((secOfDay / 2700) * 2 * Math.PI + phase2) * 0.009;  // Ciclo 45m
-  const wave3 = Math.sin((secOfDay / 600) * 2 * Math.PI + phase3) * 0.004;   // Ciclo 10m
-  const wave4 = Math.sin((secOfDay / 90) * 2 * Math.PI + phase4) * 0.0018;  // Ciclo 90s
-  const microJitter = Math.sin(secOfDay * 1.57 + phase1) * 0.0006;           // Variação viva a cada 1-2s
+  // Ondas fractais contínuas com períodos irracionais (incomensuráveis entre si, evitando qualquer loop periódico)
+  // Períodos: ~9.6h, ~3.8h, ~1.17h, ~18.7min, ~4.7min
+  const waveMacro = Math.sin((secOfDay / 34567.89) * 2 * Math.PI + phase1) * 0.019;
+  const waveSwing = Math.sin((secOfDay / 13888.88) * 2 * Math.PI + phase2) * 0.012;
+  const waveImpulse = Math.cos((secOfDay / 4217.41) * 2 * Math.PI + phase3) * 0.007;
+  const waveShort = Math.sin((secOfDay / 1123.58) * 2 * Math.PI + phase4) * 0.0035;
+  const waveMicro = Math.sin((secOfDay / 281.82) * 2 * Math.PI + phase5) * 0.0016;
 
+  // Jitter vivo de segundo em segundo (variação tick-a-tick orgânica)
+  const tickJitter = Math.sin(secOfDay * 0.7321 + phase1) * 0.00045;
+
+  // Progressão de drift cumulativo ao longo do dia
   const driftProgression = (secOfDay / 86400) * dailyDrift;
 
-  const totalPercent = (wave1 + wave2 + wave3 + wave4 + microJitter + driftProgression) * (spec.baseVolatility / 0.012);
+  const totalPercent = (waveMacro + waveSwing + waveImpulse + waveShort + waveMicro + tickJitter + driftProgression) * (spec.baseVolatility / 0.012);
   const raw = spec.basePrice * (1 + totalPercent);
   const precision = spec.basePrice < 100 ? 3 : 2;
   return Math.max(0.001, Number(raw.toFixed(precision)));
@@ -240,6 +257,13 @@ export function getLiveQuote(spec: CommoditySpec): LiveMarketQuote {
 /**
  * Gera velas históricas e vela atual sincronizadas globalmente para todos os investidores.
  * Timeframes suportados: 'M1', 'M5', 'M15', 'H1', '1D'.
+ * 
+ * Correção de Loops e Realismo:
+ * - Utiliza tempo absoluto contínuo (nowMs / periodMs) que nunca fica negativo ou preso no mesmo dia.
+ * - Simula ciclos de mercado reais: ondas de alta consistentes (3-8 velas de alta consecutivas),
+ *   ondas de baixa consistentes (3-8 velas de baixa consecutivas), consolidações e reversões.
+ * - Encadeamento contínuo: o open de cada vela é exatamente igual ao close da vela anterior.
+ * - A última vela fecha exatamente no preço ao vivo atual (live quote).
  */
 export function getDeterministicCandles(
   spec: CommoditySpec,
@@ -261,61 +285,153 @@ export function getDeterministicCandles(
   };
 
   const periodSec = tfSeconds[normTf] || 300;
+  const periodMs = periodSec * 1000;
   const serverNow = getServerNow();
-  const timeDetails = getMaputoTimeDetails();
-  const dateStr = timeDetails.dateStr;
-  const currentSecOfDay = timeDetails.hour * 3600 + timeDetails.minute * 60 + timeDetails.second;
+  const nowMs = serverNow.getTime();
+  const currentBucket = Math.floor(nowMs / periodMs);
   const precision = spec.basePrice < 100 ? 3 : 2;
 
-  const list: MarketCandle[] = [];
-  const currentBucket = Math.floor(currentSecOfDay / periodSec);
+  // Cotação atual ao vivo para cravar a vela atual
+  const liveQuote = getLiveQuote(spec);
+  const currentPrice = liveQuote.price;
 
-  // Constrói para trás de forma determinística: a última vela fecha exatamente na cotação atual
+  // Multiplicador de volatilidade por timeframe
+  let tfVolFactor = 0.20;
+  if (periodSec >= 86400) tfVolFactor = 1.6;
+  else if (periodSec >= 3600) tfVolFactor = 0.55; // H1: volatilidade realista por hora (0.7% a 1.4%)
+  else if (periodSec >= 900) tfVolFactor = 0.32;  // M15
+  else if (periodSec >= 300) tfVolFactor = 0.18;  // M5
+  else tfVolFactor = 0.08;                         // M1
+
+  const barVol = spec.basePrice * spec.baseVolatility * tfVolFactor;
+  const specSeed = hashString(`${spec.symbol}_${normTf}`);
+
+  // Fases e frequências incomensuráveis (irracionais) para regimes de tendência
+  // Duração de onda: ~18 a 35 velas por ciclo macro, criando séries de 4 a 8 velas na mesma direção
+  const phi = 1.61803398875;
+  const phase1 = ((specSeed % 1000) / 1000) * 2 * Math.PI;
+  const phase2 = (((specSeed >> 4) % 1000) / 1000) * 2 * Math.PI;
+  const phase3 = (((specSeed >> 8) % 1000) / 1000) * 2 * Math.PI;
+
+  // 1. Gera os retornos percentuais para cada barra de startBucket até currentBucket
+  const barDeltas: { delta: number; wickUp: number; wickDown: number; vol: number; bucket: number }[] = [];
+
   for (let i = 0; i < candleCount; i++) {
     const bucket = currentBucket - i;
-    const bucketStartSec = Math.max(0, bucket * periodSec);
-    const bucketEndSec = Math.min(86399, (bucket + 1) * periodSec - 1);
+    const bucketSeed = hashString(`${spec.symbol}_${normTf}_${bucket}`);
 
-    const isCurrent = (i === 0);
-    const actualEndSec = isCurrent ? currentSecOfDay : bucketEndSec;
+    // Regime de tendência macro no bucket (onda suave contínua)
+    const waveMacro = Math.sin((bucket / 24.3) * 2 * Math.PI + phase1);
+    const waveIntermediate = Math.sin((bucket / (11.8 * phi)) * 2 * Math.PI + phase2);
+    const waveShort = Math.cos((bucket / (5.6 * phi)) * 2 * Math.PI + phase3);
 
-    const open = calculateDeterministicPrice(spec, dateStr, bucketStartSec);
-    const close = calculateDeterministicPrice(spec, dateStr, actualEndSec);
+    // Tendência resultante (-1.0 a +1.0)
+    const trendMomentum = waveMacro * 0.52 + waveIntermediate * 0.33 + waveShort * 0.15;
 
-    // Amostragem interna de máxima e mínima da vela
-    let high = Math.max(open, close);
-    let low = Math.min(open, close);
-    const midStep = Math.max(1, Math.floor(periodSec / 6));
-    for (let s = bucketStartSec; s <= actualEndSec; s += midStep) {
-      const p = calculateDeterministicPrice(spec, dateStr, s);
-      if (p > high) high = p;
-      if (p < low) low = p;
+    const r1 = pseudoRand(bucketSeed, 1);
+    const r2 = pseudoRand(bucketSeed, 2);
+    const r3 = pseudoRand(bucketSeed, 3);
+    const r4 = pseudoRand(bucketSeed, 4);
+
+    let barChange = 0;
+    if (trendMomentum > 0.20) {
+      // REGIME DE ALTA (Bull trend): 80% das velas são de alta consistente
+      if (r1 > 0.20) {
+        barChange = (0.25 + 0.85 * r2) * barVol; // Vela de alta
+      } else {
+        barChange = -(0.10 + 0.35 * r2) * barVol; // Pequeno pullback corretivo
+      }
+    } else if (trendMomentum < -0.20) {
+      // REGIME DE BAIXA (Bear trend): 80% das velas são de baixa consistente
+      if (r1 > 0.20) {
+        barChange = -(0.25 + 0.85 * r2) * barVol; // Vela de baixa
+      } else {
+        barChange = (0.10 + 0.35 * r2) * barVol; // Pequeno ressalto de alívio
+      }
+    } else {
+      // CONSOLIDAÇÃO / TRANSIÇÃO: variação bilateral
+      barChange = ((r1 - 0.49) * 1.4) * barVol;
     }
 
-    // Pavios adicionais proporcionais à volatilidade real
-    const seed = hashString(`${spec.symbol}_${bucket}_${dateStr}`);
-    const wickBonus = (spec.basePrice * spec.baseVolatility * 0.15);
-    high = Number((high + (((seed % 100) / 100) * wickBonus)).toFixed(precision));
-    low = Number((Math.max(0.001, low - ((((seed >> 3) % 100) / 100) * wickBonus))).toFixed(precision));
+    // Pavios proporcionais e variados
+    const wickBonus = barVol * 0.25;
+    const wickUp = (0.10 + 0.80 * r3) * wickBonus;
+    const wickDown = (0.10 + 0.80 * r4) * wickBonus;
 
-    // Timestamp da vela
-    const candleServerTime = new Date(serverNow.getTime() - i * periodSec * 1000);
-    const h = String(candleServerTime.getHours()).padStart(2, '0');
-    const m = String(candleServerTime.getMinutes()).padStart(2, '0');
-    const timeStr = normTf === '1D' || normTf === 'D1'
-      ? `${candleServerTime.getDate()}/${candleServerTime.getMonth() + 1}`
-      : `${h}:${m}`;
+    // Volume realista com aumento em rompimentos e barras de expansão
+    const volumeBase = 12000 + Math.floor(r1 * 28000);
+    const volumeMultiplier = Math.abs(barChange) > barVol * 0.6 ? 1.6 : 1.0;
+    const barVolume = Math.floor(volumeBase * volumeMultiplier);
 
-    const vol = Math.floor(18000 + ((seed % 40000)));
+    barDeltas.unshift({
+      delta: barChange,
+      wickUp,
+      wickDown,
+      vol: barVolume,
+      bucket
+    });
+  }
 
-    list.unshift({
+  // 2. Constrói as velas encadeadas perfeitamente:
+  // candle[k].open === candle[k-1].close
+  // A última vela (índice candleCount - 1) fecha exatamente no currentPrice!
+  const list: MarketCandle[] = [];
+  const prices: { open: number; close: number }[] = new Array(candleCount);
+  
+  let runningClose = currentPrice;
+  for (let k = candleCount - 1; k >= 0; k--) {
+    const item = barDeltas[k];
+    
+    const candleClose = runningClose;
+    let candleOpen = candleClose - item.delta;
+    if (candleOpen <= 0) candleOpen = spec.basePrice * 0.5;
+
+    prices[k] = {
+      open: Number(candleOpen.toFixed(precision)),
+      close: Number(candleClose.toFixed(precision))
+    };
+
+    runningClose = candleOpen;
+  }
+
+  // 3. Monta o array final com high, low, volume e horário de Moçambique (UTC+2)
+  for (let k = 0; k < candleCount; k++) {
+    const item = barDeltas[k];
+    const { open, close } = prices[k];
+    const isLatest = (k === candleCount - 1);
+
+    let high = Math.max(open, close) + item.wickUp;
+    let low = Math.min(open, close) - item.wickDown;
+
+    if (isLatest) {
+      high = Math.max(open, close, high * 0.995);
+      low = Math.min(open, close, low * 1.005);
+    }
+
+    if (low <= 0.001) low = 0.001;
+    if (high < Math.max(open, close)) high = Math.max(open, close);
+
+    const candleTimestampMs = item.bucket * periodMs;
+    // Converte para Hora Oficial de Moçambique (UTC+2)
+    const maputoTimeMs = candleTimestampMs + (2 * 3600 * 1000);
+    const maputoDate = new Date(maputoTimeMs);
+    const hours = String(maputoDate.getUTCHours()).padStart(2, '0');
+    const mins = String(maputoDate.getUTCMinutes()).padStart(2, '0');
+    const day = String(maputoDate.getUTCDate()).padStart(2, '0');
+    const month = String(maputoDate.getUTCMonth() + 1).padStart(2, '0');
+
+    const timeStr = (normTf === '1D' || normTf === 'D1')
+      ? `${day}/${month}`
+      : `${hours}:${mins}`;
+
+    list.push({
       time: timeStr,
-      open,
-      high,
-      low,
-      close,
-      volume: vol,
-      timestamp: candleServerTime.getTime()
+      open: Number(open.toFixed(precision)),
+      high: Number(high.toFixed(precision)),
+      low: Number(low.toFixed(precision)),
+      close: Number(close.toFixed(precision)),
+      volume: item.vol,
+      timestamp: candleTimestampMs
     });
   }
 
