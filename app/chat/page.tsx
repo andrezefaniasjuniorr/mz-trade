@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -70,8 +70,8 @@ import {
   playMessageSound,
   triggerPushNotification
 } from '@/lib/chatService';
-import WhatsAppLightbox from '@/components/WhatsAppLightbox';
-import WhatsAppAudioPlayer from '@/components/WhatsAppAudioPlayer';
+import ChatMediaLightbox from '@/components/ChatMediaLightbox';
+import ChatAudioPlayer from '@/components/ChatAudioPlayer';
 
 const AVAILABLE_REACTIONS = ['👍', '❤️', '🚀'];
 
@@ -104,7 +104,7 @@ const SEED_MESSAGES = [
     displayName: 'Administração TapRise',
     email: ADMIN_EMAIL,
     isAdmin: true,
-    text: '📢 AVISO OFICIAL: Mantenham sempre a reserva de garantia de 1.000,00 MT em conta para custódia e execução segura na abertura das 21h.',
+    text: '📢 AVISO OFICIAL: Mantenham sempre a reserva de garantia de 500,00 MT em conta para custódia e execução segura na abertura das 21h.',
     type: 'system' as const,
     replyToId: null
   }
@@ -497,7 +497,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
             </div>
           )}
 
-          {/* Imagem Thumb estilo WhatsApp */}
+          {/* Imagem Thumb */}
           {isImage && effectiveImageUrl && !msg.isDeleted && (
             <div className="relative mb-2 overflow-hidden rounded-xl bg-slate-950/40 border border-white/10 group/img">
               <img
@@ -518,7 +518,7 @@ const GroupMessageItem = memo(function GroupMessageItem({
                 }`}
               />
 
-              {/* Upload Progress Bar estilo WhatsApp */}
+              {/* Upload Progress Bar */}
               {msg.isUploading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 p-4">
                   <div className="w-10 h-10 rounded-full border-3 border-white/20 border-t-[#2563eb] animate-spin mb-2" />
@@ -544,10 +544,10 @@ const GroupMessageItem = memo(function GroupMessageItem({
             </div>
           )}
 
-          {/* Player de Áudio estilo WhatsApp */}
+          {/* Player de Áudio */}
           {isAudio && (msg.audioUrl || msg.localPreviewUrl) && !msg.isDeleted && (
             <div className="mb-1">
-              <WhatsAppAudioPlayer
+              <ChatAudioPlayer
                 id={msg.id}
                 audioUrl={msg.audioUrl || msg.localPreviewUrl || ''}
                 duracao={msg.duracao}
@@ -807,10 +807,10 @@ const PrivateMessageItem = memo(function PrivateMessageItem({
             </div>
           )}
 
-          {/* Player de Áudio estilo WhatsApp */}
+          {/* Player de Áudio */}
           {isAudio && (msg.audioUrl || msg.localPreviewUrl) && (
             <div className="mb-1">
-              <WhatsAppAudioPlayer
+              <ChatAudioPlayer
                 id={msg.id}
                 audioUrl={msg.audioUrl || msg.localPreviewUrl || ''}
                 duracao={msg.duracao}
@@ -1459,6 +1459,32 @@ export default function ChatPage() {
     };
   }, []);
 
+  // Trava o scroll global do navegador móvel para que a barra superior fique 100% fixa e imóvel
+  useEffect(() => {
+    const origBodyOverflow = document.body.style.overflow;
+    const origBodyPosition = document.body.style.position;
+    const origBodyWidth = document.body.style.width;
+    const origBodyHeight = document.body.style.height;
+    const origHtmlOverflow = document.documentElement.style.overflow;
+    const origHtmlHeight = document.documentElement.style.height;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100dvh';
+    document.documentElement.style.overflow = 'hidden';
+    document.documentElement.style.height = '100dvh';
+
+    return () => {
+      document.body.style.overflow = origBodyOverflow;
+      document.body.style.position = origBodyPosition;
+      document.body.style.width = origBodyWidth;
+      document.body.style.height = origBodyHeight;
+      document.documentElement.style.overflow = origHtmlOverflow;
+      document.documentElement.style.height = origHtmlHeight;
+    };
+  }, []);
+
   // 5. CHAT PRIVADO: LISTENER DE MENSAGENS DA CONVERSA SELECIONADA
   const activePrivateTargetUid = isAdmin ? adminSelectedUserId : user?.uid;
 
@@ -1467,7 +1493,7 @@ export default function ChatPage() {
       return;
     }
 
-    // Carrega instantaneamente mensagens em cache deste usuário (Offline-first estilo WhatsApp)
+    // Carrega instantaneamente mensagens em cache deste usuário (Offline-first)
     const cacheTimer = setTimeout(() => {
       const localCached = loadLocalPrivateMessages(activePrivateTargetUid);
       if (localCached.length > 0) {
@@ -2375,7 +2401,15 @@ export default function ChatPage() {
   }, [isAdmin, privateChatsList, adminSelectedUserId]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#0f172a] text-slate-100 overflow-hidden font-sans select-none" style={{ backgroundColor: '#0f172a' }}>
+    <div
+      className="fixed inset-0 top-0 left-0 right-0 bottom-0 w-full flex flex-col bg-[#0f172a] text-slate-100 overflow-hidden font-sans select-none overscroll-none"
+      style={{
+        backgroundColor: '#0f172a',
+        height: '100dvh',
+        maxHeight: '100dvh',
+        position: 'fixed'
+      }}
+    >
       
       {/* Toast Alert */}
       {toast && (
@@ -2397,8 +2431,8 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Lightbox em Tela Cheia estilo WhatsApp */}
-      <WhatsAppLightbox
+      {/* Lightbox em Tela Cheia */}
+      <ChatMediaLightbox
         isOpen={lightboxData.isOpen}
         imageUrl={lightboxData.url}
         caption={lightboxData.caption}
@@ -2467,8 +2501,14 @@ export default function ChatPage() {
         className="hidden"
       />
 
-      {/* HEADER PRINCIPAL (56px) COM SEGMENTED CONTROL [👥 GRUPO] [🛡️ ADMIN] */}
-      <header className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 h-14 shrink-0 px-3 sm:px-6 flex items-center justify-between z-30 shadow-xs">
+      {/* HEADER PRINCIPAL (56px) TOTALMENTE FIXO NO TOPO COM SEGMENTED CONTROL [👥 GRUPO] [🛡️ ADMIN] */}
+      <header
+        className="sticky top-0 left-0 right-0 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-800 h-14 shrink-0 px-3 sm:px-6 flex items-center justify-between z-30 shadow-xs select-none overscroll-none"
+        style={{
+          WebkitBackdropFilter: 'blur(12px)',
+          top: 0
+        }}
+      >
         
         {/* Esquerda: [<-] [TR Logo] + Título */}
         <div className="flex items-center space-x-2.5 sm:space-x-3">
@@ -2607,8 +2647,12 @@ export default function ChatPage() {
           <div
             ref={chatContainerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 relative pb-28"
-            style={{ backgroundColor: '#0f172a' }}
+            className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 relative pb-28 overscroll-contain"
+            style={{
+              backgroundColor: '#0f172a',
+              WebkitOverflowScrolling: 'touch',
+              overscrollBehavior: 'contain'
+            }}
           >
             {isLoadingMessages && messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center space-y-3 py-20">
@@ -2704,7 +2748,7 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* Input do Grupo com Ícone [📷] à esquerda + Preview Acoplado + Textarea estilo WhatsApp */}
+          {/* Input do Grupo com Ícone [📷] à esquerda + Preview Acoplado + Textarea */}
           <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 z-40 shadow-2xl" style={{ backgroundColor: '#0f172a' }}>
             {/* Preview de Resposta Ativa */}
             <AnimatePresence>
@@ -2944,7 +2988,7 @@ export default function ChatPage() {
       )}
 
       {/* ================================================================= */}
-      {/* VISTA 2: CHAT PRIVADO COM ADMIN (ESTRUTURA WHATSAPP)              */}
+      {/* VISTA 2: CHAT PRIVADO COM ADMIN                                   */}
       {/* ================================================================= */}
       {activeSegment === 'privado' && (
         <div className="flex-1 flex overflow-hidden bg-slate-950">
@@ -3078,8 +3122,12 @@ export default function ChatPage() {
             {/* Mensagens Privadas */}
             <div
               ref={privateContainerRef}
-              className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 pb-28"
-              style={{ backgroundColor: '#0f172a' }}
+              className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 pb-28 overscroll-contain"
+              style={{
+                backgroundColor: '#0f172a',
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain'
+              }}
             >
               {isLoadingPrivateMessages ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-2 py-10">

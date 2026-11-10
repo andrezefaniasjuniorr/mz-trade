@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, use } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -1475,7 +1475,7 @@ export default function Home() {
     return tradeHistory.reduce((acc, trade) => acc + trade.pnl, 0);
   }, [tradeHistory]);
 
-  const reserveAmount = 1000.00;
+  const reserveAmount = 500.00;
   const rawWithdrawable = Math.max(0, Math.floor(((balance - reserveAmount) / 1.05) * 100) / 100);
   const withdrawableBalance = Math.min(2000, rawWithdrawable);
 
@@ -1542,9 +1542,9 @@ export default function Home() {
     const totalDebitado = Number((numAmount + fee).toFixed(2));
     const saldoRestante = Number((balance - totalDebitado).toFixed(2));
 
-    if (saldoRestante < 1000) {
+    if (saldoRestante < 500) {
       showToast(
-        `Regra TapRise: O levantamento foi recusado porque deve sempre sobrar no mínimo 1.000,00 MT na conta após o levantamento e a taxa de 5% (${fee.toFixed(2)} MT). Com o saldo atual de ${balance.toFixed(2)} MT, restariam apenas ${saldoRestante.toFixed(2)} MT.`,
+        `Regra TapRise: O levantamento foi recusado porque deve sempre sobrar no mínimo 500,00 MT na conta após o levantamento e a taxa de 5% (${fee.toFixed(2)} MT). Com o saldo atual de ${balance.toFixed(2)} MT, restariam apenas ${saldoRestante.toFixed(2)} MT.`,
         'error'
       );
       return;
@@ -1991,7 +1991,7 @@ export default function Home() {
                         <div className="flex items-center justify-between font-bold text-amber-900 mb-0.5">
                           <span className="flex items-center gap-1 text-[11px]">
                             <Coins className="w-3 h-3 text-amber-600" />
-                            Depósito Mínimo: 1.000 MT
+                            Depósito Mínimo: 500 MT
                           </span>
                           <span className="text-[9px] text-amber-700 bg-white px-1.5 py-0.5 rounded border border-amber-200">e-Mola</span>
                         </div>
@@ -2973,7 +2973,7 @@ export default function Home() {
                           Canal Oficial de Recarga
                         </span>
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-400 text-slate-900 uppercase tracking-wider">
-                          Mínimo: 1.000,00 MT
+                          Mínimo: 500,00 MT
                         </span>
                         <span className="text-xs text-amber-100 font-medium">
                           Carteira Móvel e-Mola (Movitel)
@@ -2983,7 +2983,7 @@ export default function Home() {
                         Depósito via e-Mola
                       </h3>
                       <p className="text-xs text-amber-100/90 leading-relaxed">
-                        Faça a recarga da sua conta de forma simples e rápida diretamente pelo seu telemóvel usando o serviço e-Mola. O valor mínimo para qualquer depósito é de <strong>1.000,00 MT</strong>.
+                        Faça a recarga da sua conta de forma simples e rápida diretamente pelo seu telemóvel usando o serviço e-Mola. O valor mínimo para qualquer depósito é de <strong>500,00 MT</strong>.
                       </p>
                     </div>
                   </div>
@@ -2994,10 +2994,10 @@ export default function Home() {
                     </div>
                     <div>
                       <p className="font-black text-amber-950 uppercase tracking-wider text-[11px]">
-                        Regra Oficial: Depósito Mínimo de 1.000,00 MT
+                        Regra Oficial: Depósito Mínimo de 500,00 MT
                       </p>
                       <p className="text-amber-800 text-[11px] mt-0.5 leading-relaxed">
-                        O montante mínimo de recarga permitido na plataforma é de <strong>1.000,00 MT</strong>. Transferências com valores inferiores a 1.000 MT não serão validadas nem creditadas pelo sistema.
+                        O montante mínimo de recarga permitido na plataforma é de <strong>500,00 MT</strong>. Transferências com valores inferiores a 500 MT não serão validadas nem creditadas pelo sistema.
                       </p>
                     </div>
                   </div>
@@ -3103,7 +3103,7 @@ export default function Home() {
                       <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
                         <span className="w-6 h-6 rounded-full bg-amber-500 text-white text-[11px] font-black flex items-center justify-center">3</span>
                         <p className="font-bold text-slate-900 pt-1">Confirme o Titular</p>
-                        <p className="text-slate-500 text-[11px]">Verifique <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>1.000,00 MT</strong>) e confirme com o PIN.</p>
+                        <p className="text-slate-500 text-[11px]">Verifique <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>500,00 MT</strong>) e confirme com o PIN.</p>
                       </div>
                       <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
                         <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-black flex items-center justify-center">4</span>
@@ -3346,7 +3346,7 @@ export default function Home() {
                         Levantamento Direto para o seu Telemóvel
                       </h3>
                       <p className="text-xs text-slate-300 leading-relaxed">
-                        Retire o seu saldo disponível entre <strong>300,00 MT</strong> e <strong>2.000,00 MT</strong> por pedido (intervalo mínimo de <strong>3 dias</strong> entre pedidos). Taxa operacional de <strong>5%</strong>. Deve sempre sobrar no mínimo <strong>1.000,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
+                        Retire o seu saldo disponível entre <strong>300,00 MT</strong> e <strong>2.000,00 MT</strong> por pedido (intervalo mínimo de <strong>3 dias</strong> entre pedidos). Taxa operacional de <strong>5%</strong>. Deve sempre sobrar no mínimo <strong>500,00 MT</strong> em conta. Horário diário: <strong>08:00 às 12:00</strong> (Maputo).
                       </p>
                     </div>
 
@@ -3683,7 +3683,7 @@ export default function Home() {
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-white leading-tight">Programa de Convites & Bónus</h3>
-                      <p className="text-[10px] text-blue-200">5% creditado após 1º depósito do convidado (mín. 1.000 MT)</p>
+                      <p className="text-[10px] text-blue-200">5% creditado após 1º depósito do convidado (mín. 500 MT)</p>
                     </div>
                   </div>
                   <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-300/30">
@@ -4169,10 +4169,10 @@ export default function Home() {
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <div>
                   <p className="font-bold text-[11px] text-amber-950">
-                    Depósito Mínimo Obrigatório: 1.000,00 MT
+                    Depósito Mínimo Obrigatório: 500,00 MT
                   </p>
                   <p className="text-[11px] text-amber-800 leading-snug">
-                    O valor mínimo de recarga é de <strong>1.000,00 MT</strong>. Valores inferiores não são aceites pelo sistema.
+                    O valor mínimo de recarga é de <strong>500,00 MT</strong>. Valores inferiores não são aceites pelo sistema.
                   </p>
                 </div>
               </div>
@@ -4182,7 +4182,7 @@ export default function Home() {
                 <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-600">
                   <li>Disque <strong>*898#</strong> ou aceda à app e-Mola.</li>
                   <li>Escolha <strong>Transferir Dinheiro</strong> para <strong>877083749</strong>.</li>
-                  <li>Confirme o nome <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>1.000,00 MT</strong>) e conclua com o seu PIN.</li>
+                  <li>Confirme o nome <strong>ELIZABETE NHATSUNGUE</strong>, digite o valor (mínimo <strong>500,00 MT</strong>) e conclua com o seu PIN.</li>
                 </ol>
               </div>
 
@@ -4416,7 +4416,7 @@ export default function Home() {
                 const feeAmt = Math.round(amt * 0.05 * 100) / 100;
                 const debAmt = amt + feeAmt;
                 const remBal = balance - debAmt;
-                const isShort = remBal < 1000;
+                const isShort = remBal < 500;
                 const isOverMax = amt > 2000;
 
                 return (
@@ -4452,7 +4452,7 @@ export default function Home() {
                     </div>
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-slate-400">Reserva Mínima Obrigatória:</span>
-                      <span className="font-mono font-bold text-amber-700">1.000,00 MT</span>
+                      <span className="font-mono font-bold text-amber-700">500,00 MT</span>
                     </div>
 
                     {isOverMax && (
@@ -4465,7 +4465,7 @@ export default function Home() {
                     {isShort && (
                       <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 font-semibold flex items-start gap-1.5 mt-1">
                         <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
-                        <span>Atenção: O levantamento será recusado porque devem sempre sobrar pelo menos 1.000,00 MT na conta após o valor e a taxa de 5%.</span>
+                        <span>Atenção: O levantamento será recusado porque devem sempre sobrar pelo menos 500,00 MT na conta após o valor e a taxa de 5%.</span>
                       </div>
                     )}
                   </div>
@@ -4510,7 +4510,7 @@ export default function Home() {
                     !withdrawalWindow.isOpen ||
                     parseFloat(withdrawalAmount) < 300 ||
                     parseFloat(withdrawalAmount) > 2000 ||
-                    balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ||
+                    balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 500 ||
                     withdrawalPhone.length !== 9 ||
                     !withdrawalName.trim()
                   }
@@ -4527,8 +4527,8 @@ export default function Home() {
                     <span>Janela Fechada (Abre 08h)</span>
                   ) : parseFloat(withdrawalAmount) > 2000 ? (
                     <span>Máximo Permitido: 2.000 MT</span>
-                  ) : balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 1000 ? (
-                    <span>Reserva Insuficiente (&lt; 1.000 MT)</span>
+                  ) : balance - ((parseFloat(withdrawalAmount) || 0) * 1.05) < 500 ? (
+                    <span>Reserva Insuficiente (&lt; 500 MT)</span>
                   ) : (
                     <span>Confirmar Levantamento</span>
                   )}

@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/context/AuthContext";
 import OfflineBanner from "@/components/OfflineBanner";
+import PWAInstallCard from "@/components/PWAInstallCard";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://taprise.pages.dev"),
@@ -58,6 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body suppressHydrationWarning className="bg-[#0f172a] text-slate-900 antialiased min-h-screen overflow-x-hidden">
         <AuthProvider>
           <OfflineBanner />
+          <PWAInstallCard />
           {children}
         </AuthProvider>
 

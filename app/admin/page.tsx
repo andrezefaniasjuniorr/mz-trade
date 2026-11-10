@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -1248,7 +1248,7 @@ export default function AdminPage() {
       setIsPayingBonus(true);
       const baseVal = Math.max(
         parseFloat(creditAmount) || 0,
-        Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 1000)
+        Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 500)
       );
       const commissionAmount = Number((baseVal * 0.05).toFixed(2));
 
@@ -2787,7 +2787,7 @@ export default function AdminPage() {
 
                 const baseForBonus = Math.max(
                   parseFloat(creditAmount) || 0,
-                  Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 1000)
+                  Number(selectedUserForCredit.saldoDisponivel ?? selectedUserForCredit.balance ?? selectedUserForCredit.saldoVirtual ?? 500)
                 );
                 const calculatedBonus = Number((baseForBonus * 0.05).toFixed(2));
                 const isPaid = !!selectedUserForCredit.commissionPaid;

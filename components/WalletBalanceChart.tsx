@@ -39,7 +39,7 @@ export function WalletBalanceChart({
   const [baseTimestamp] = useState(() => Date.now());
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const reserveAmount = 1000.00;
+  const reserveAmount = 500.00;
   const withdrawableAmount = Math.max(0, currentBalance - reserveAmount);
 
   // Gera pontos do gráfico proporcionais ao saldo real e transações
@@ -158,7 +158,7 @@ export function WalletBalanceChart({
       ctx.fillText(`${Math.round(stepVal).toLocaleString('pt-MZ')} MT`, paddingX - 8, y + 3);
     }
 
-    // 2. Linha de Reserva Mínima Obrigatória (1.000 MT)
+    // 2. Linha de Reserva Mínima Obrigatória (500 MT)
     const reserveY = getY(reserveAmount);
     if (reserveY >= paddingY && reserveY <= paddingY + chartHeight) {
       ctx.strokeStyle = '#F59E0B';
@@ -173,7 +173,7 @@ export function WalletBalanceChart({
       ctx.fillStyle = '#D97706';
       ctx.font = 'bold 9px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('Reserva Mínima (1.000 MT)', paddingX + 6, reserveY - 5);
+      ctx.fillText('Reserva Mínima (500 MT)', paddingX + 6, reserveY - 5);
     }
 
     // 3. Preenchimento de Área Gradiente

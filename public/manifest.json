@@ -1,7 +1,8 @@
 {
-  "name": "TapRise - Bolsa e Mercadorias de Moçambique",
+  "id": "/",
+  "name": "TapRise - Bolsa e Mercadorias",
   "short_name": "TapRise",
-  "description": "TapRise - Plataforma profissional com conta de investidor, chat ao vivo com a Mesa e outros investidores. Janela operacional de segunda a sexta, das 21h às 21h30. 1 clique, menos de 1 minuto.",
+  "description": "TapRise - Plataforma profissional com conta de investidor, chat ao vivo com a Mesa e outros investidores. Janela operacional das 21h às 21h30.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,15 +11,22 @@
   "theme_color": "#020617",
   "icons": [
     {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "/icon.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
-    },
-    {
-      "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
     }
   ]
 }
