@@ -871,6 +871,7 @@ export default function ChatPage() {
     pinnedMessageId?: string | null;
     pinnedText?: string;
     pinnedAuthor?: string;
+    pinnedAt?: any;
   } | null>(null);
 
   // Mapa de fotos de perfil em tempo real para sincronização instantânea
@@ -1256,18 +1257,31 @@ export default function ChatPage() {
     }
   }, [messages]);
 
-  // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat)
+  // 1.1 COMUNICADO / AVISO FIXADO NO TOPO (admin_config/chat) COM EXPIRAÇÃO DE 24H
   useEffect(() => {
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
     const pinnedRef = doc(db, 'admin_config', 'chat');
     const unsub = onSnapshot(pinnedRef, (snap) => {
       if (snap.exists()) {
         const d = snap.data();
         if (d.pinnedText) {
-          setPinnedNotice({
-            pinnedMessageId: d.pinnedMessageId || null,
-            pinnedText: d.pinnedText,
-            pinnedAuthor: d.pinnedAuthor || 'Administração TapRise'
-          });
+          const pinnedTimeMs = d.pinnedAt?.toMillis
+            ? d.pinnedAt.toMillis()
+            : (d.pinnedAt?.seconds ? d.pinnedAt.seconds * 1000 : (d.pinnedAt ? new Date(d.pinnedAt).getTime() : 0));
+          
+          const isExpired = pinnedTimeMs > 0 && (Date.now() - pinnedTimeMs > TWENTY_FOUR_HOURS_MS);
+
+          if (!isExpired) {
+            setPinnedNotice({
+              pinnedMessageId: d.pinnedMessageId || null,
+              pinnedText: d.pinnedText,
+              pinnedAuthor: d.pinnedAuthor || 'Administração TapRise',
+              pinnedAt: d.pinnedAt
+            });
+          } else {
+            setPinnedNotice(null);
+          }
         } else {
           setPinnedNotice(null);
         }
@@ -1276,8 +1290,44 @@ export default function ChatPage() {
       }
     }, (err) => console.warn('Erro ao escutar aviso fixado:', err));
 
-    return () => unsub();
+    // Verificação de expiração em background a cada 60s (sem mostrar contador ao utilizador)
+    const checkExpiryInterval = setInterval(() => {
+      setPinnedNotice((current) => {
+        if (!current || !current.pinnedAt) return current;
+        const pinnedTimeMs = current.pinnedAt?.toMillis
+          ? current.pinnedAt.toMillis()
+          : (current.pinnedAt?.seconds ? current.pinnedAt.seconds * 1000 : (current.pinnedAt ? new Date(current.pinnedAt).getTime() : 0));
+        if (pinnedTimeMs > 0 && Date.now() - pinnedTimeMs > TWENTY_FOUR_HOURS_MS) {
+          return null; // Expira silenciosamente após 24h
+        }
+        return current;
+      });
+    }, 60000);
+
+    return () => {
+      unsub();
+      clearInterval(checkExpiryInterval);
+    };
   }, []);
+
+  // Desafixar comunicado pelo Administrador diretamente do chat
+  const handleUnpinChatMessage = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      const pinnedRef = doc(db, 'admin_config', 'chat');
+      await updateDoc(pinnedRef, {
+        pinnedMessageId: null,
+        pinnedText: '',
+        pinnedAuthor: '',
+        pinnedAt: null
+      });
+      setPinnedNotice(null);
+      showToast('Comunicado desafixado do grupo.', 'info');
+    } catch (err) {
+      console.error('Erro ao desafixar comunicado:', err);
+      showToast('Erro ao desafixar comunicado.', 'error');
+    }
+  };
 
   // 2. PRESENÇA REAL (taprise_presence)
   useEffect(() => {
@@ -2636,10 +2686,23 @@ export default function ChatPage() {
                   </p>
                 </div>
               </div>
-              <span className="text-[11px] text-amber-400 font-bold font-mono shrink-0 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 flex items-center gap-1">
-                <span>Ver</span>
-                <span>↗</span>
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-amber-400 font-bold font-mono bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 flex items-center gap-1">
+                  <span>Ver</span>
+                  <span>↗</span>
+                </span>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleUnpinChatMessage}
+                    className="px-2 py-0.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-[10px] transition flex items-center gap-1 cursor-pointer"
+                    title="Desafixar este comunicado do topo para todos"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Desafixar</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

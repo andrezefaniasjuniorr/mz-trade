@@ -45,8 +45,10 @@ import {
   Camera,
   Upload,
   Trash2,
-  Maximize2
+  Maximize2,
+  WifiOff
 } from 'lucide-react';
+import { getTrustedCurrentTime, isDeviceTimeTampered } from '@/lib/timeIntegrity';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -854,15 +856,15 @@ const InteractiveChart = ({
   );
 };
 
-// Stable Clock Store for pure render ticks
-let cachedClockNow = typeof window !== 'undefined' ? Date.now() : 0;
+// Stable Clock Store for pure render ticks (sincronizado com tempo seguro do servidor)
+let cachedClockNow = typeof window !== 'undefined' ? getTrustedCurrentTime() : 0;
 const clockListeners = new Set<() => void>();
 
 if (typeof window !== 'undefined') {
   setInterval(() => {
-    cachedClockNow = Date.now();
+    cachedClockNow = getTrustedCurrentTime();
     clockListeners.forEach((cb) => cb());
-  }, 10000);
+  }, 5000);
 }
 
 const subscribeToClock = (callback: () => void) => {
@@ -981,6 +983,23 @@ export default function Home() {
     return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
   });
   const latestChatMsgIdRef = useRef<string | null>(null);
+
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  });
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const [localBalance, setLocalBalance] = useState<number | null>(null);
   const balance = localBalance !== null ? localBalance : (profile?.balance ?? profile?.saldoVirtual ?? 0.00);
@@ -1485,8 +1504,9 @@ export default function Home() {
     ? (lastWithdrawal.requestedAt?.toMillis ? lastWithdrawal.requestedAt.toMillis() : (lastWithdrawal.requestedAt?.seconds ? lastWithdrawal.requestedAt.seconds * 1000 : (lastWithdrawal.requestedAt ? new Date(lastWithdrawal.requestedAt).getTime() : 0)))
     : 0;
 
-  const timeSinceLastWithdrawal = nowMs > 0 && lastWithdrawalTime > 0 ? nowMs - lastWithdrawalTime : 0;
-  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && nowMs > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
+  const trustedNowMs = nowMs > 0 ? nowMs : getTrustedCurrentTime();
+  const timeSinceLastWithdrawal = trustedNowMs > 0 && lastWithdrawalTime > 0 ? trustedNowMs - lastWithdrawalTime : 0;
+  const isWithdrawalCooldownActive = lastWithdrawalTime > 0 && trustedNowMs > 0 && timeSinceLastWithdrawal < THREE_DAYS_MS;
   const remainingCooldownMs = isWithdrawalCooldownActive ? THREE_DAYS_MS - timeSinceLastWithdrawal : 0;
 
   const getCooldownLabel = (ms: number) => {
@@ -1510,6 +1530,16 @@ export default function Home() {
     if (e) e.preventDefault();
     if (!user) {
       showToast('Inicie sessão para solicitar levantamentos.', 'error');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      showToast('Sem conexão à internet. Ligue a rede para submeter o pedido de levantamento.', 'error');
+      return;
+    }
+
+    if (isDeviceTimeTampered()) {
+      showToast('Ação bloqueada: A data do seu telemóvel foi alterada. Acerte o horário automático para poder levantar.', 'error');
       return;
     }
 
@@ -2249,29 +2279,57 @@ export default function Home() {
             )}
           </nav>
 
-          <div className="bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-4 text-white space-y-3 shadow-md">
+          <div className="bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-4 text-white space-y-3 shadow-md relative overflow-hidden">
+            {!isOnline && (
+              <div className="bg-amber-500 text-slate-950 -mx-4 -mt-4 mb-2 px-3 py-1 text-[10px] font-black flex items-center justify-center gap-1.5 shadow-sm">
+                <WifiOff className="w-3 h-3 shrink-0" />
+                <span>COTAÇÃO PAUSADA • SEM INTERNET</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-blue-200">Destaque Nacional</span>
-              <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded font-bold">ALTO VOLUME</span>
+              {isOnline ? (
+                <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded font-bold">ALTO VOLUME</span>
+              ) : (
+                <span className="text-[10px] bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                  <WifiOff className="w-2.5 h-2.5 shrink-0" /> EM PAUSA
+                </span>
+              )}
             </div>
             <div>
               <p className="text-xs text-blue-100 font-medium">Castanha de Caju (Nampula)</p>
-              <p className="text-xl font-black mt-0.5">
-                {formatMT(commodities.find((c) => c.id === 'cashew')?.price || 95.50)}
+              <p className="text-xl font-black mt-0.5 flex items-center gap-2">
+                <span>{formatMT(commodities.find((c) => c.id === 'cashew')?.price || 95.50)}</span>
+                {!isOnline && (
+                  <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-1.5 py-0.5 rounded">
+                    Congelado
+                  </span>
+                )}
               </p>
-              <p className="text-xs text-emerald-400 font-semibold mt-0.5">
-                +{(commodities.find((c) => c.id === 'cashew')?.change24h || 5.4).toFixed(2)}% nas últimas 24h
+              <p className={`text-xs font-semibold mt-0.5 ${isOnline ? 'text-emerald-400' : 'text-amber-300'}`}>
+                {isOnline
+                  ? `+${(commodities.find((c) => c.id === 'cashew')?.change24h || 5.4).toFixed(2)}% nas últimas 24h`
+                  : 'Cotação congelada (Aguardando reestabelecimento da rede...)'}
               </p>
             </div>
             <button
               onClick={() => {
+                if (!isOnline) {
+                  showToast('Sem conexão à internet. Ligue a rede para negociar.', 'error');
+                  return;
+                }
                 setSelectedAssetId('cashew');
                 setTradeSide('BUY');
                 setIsTradeModalOpen(true);
               }}
-              className="w-full py-2 bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1 cursor-pointer"
+              disabled={!isOnline}
+              className={`w-full py-2 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1 cursor-pointer ${
+                isOnline
+                  ? 'bg-blue-500 hover:bg-blue-400 cursor-pointer'
+                  : 'bg-slate-700/80 text-slate-300 cursor-not-allowed opacity-75'
+              }`}
             >
-              <span>Negociar Agora</span>
+              <span>{isOnline ? 'Negociar Agora' : 'Sem Conexão'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

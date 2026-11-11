@@ -4349,15 +4349,32 @@ export default function AdminPage() {
                     <Pin className="w-4 h-4 text-amber-400 rotate-45" />
                     Mensagem Atualmente Fixada no Topo
                   </h3>
-                  {pinnedChatConfig?.pinnedMessageId ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      Fixada
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
-                      Nenhuma
-                    </span>
-                  )}
+                  {(() => {
+                    const pinnedTimeMs = pinnedChatConfig?.pinnedAt?.toMillis
+                      ? pinnedChatConfig.pinnedAt.toMillis()
+                      : (pinnedChatConfig?.pinnedAt?.seconds ? pinnedChatConfig.pinnedAt.seconds * 1000 : (pinnedChatConfig?.pinnedAt ? new Date(pinnedChatConfig.pinnedAt).getTime() : 0));
+                    const isPinnedExpired = pinnedTimeMs > 0 && (Date.now() - pinnedTimeMs > 24 * 60 * 60 * 1000);
+
+                    if (pinnedChatConfig?.pinnedMessageId && !isPinnedExpired) {
+                      return (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Fixada Ativa (24h)
+                        </span>
+                      );
+                    }
+                    if (pinnedChatConfig?.pinnedMessageId && isPinnedExpired) {
+                      return (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          Expirada (passou de 24h)
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
+                        Nenhuma
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {pinnedChatConfig?.pinnedMessageId ? (

@@ -439,22 +439,43 @@ export function getDeterministicCandles(
 }
 
 // ==========================================
-// STORE GLOBAL EM MEMÓRIA (SINGLETON)
+// STORE GLOBAL EM MEMÓRIA (SINGLETON) COM SUPORTE A OFFLINE FREEZE & CATCH-UP
 // ==========================================
 
 let currentGlobalQuotes: LiveMarketQuote[] = COMMODITY_SPECS.map(getLiveQuote);
 const listeners = new Set<(quotes: LiveMarketQuote[]) => void>();
+let isMarketOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
+let offlineSinceMs: number | null = null;
 
 function updateGlobalMarket() {
+  // Se estiver sem conexão à internet, congela completamente (não simula localmente)
+  if (typeof window !== 'undefined') {
+    if (!navigator.onLine || isMarketOffline) {
+      return;
+    }
+  }
+
   currentGlobalQuotes = COMMODITY_SPECS.map(getLiveQuote);
   listeners.forEach((cb) => {
     try { cb(currentGlobalQuotes); } catch {}
   });
 }
 
-// Inicia o motor global com intervalo fixo de 1000ms
+// Inicia o motor global com intervalo fixo de 1000ms e listeners de conexão
 if (typeof window !== 'undefined') {
   setInterval(updateGlobalMarket, 1000);
+
+  window.addEventListener('offline', () => {
+    isMarketOffline = true;
+    offlineSinceMs = Date.now();
+  });
+
+  window.addEventListener('online', () => {
+    isMarketOffline = false;
+    offlineSinceMs = null;
+    // Catch-up imediato: atualiza instantaneamente para o estado real após o tempo inativo
+    updateGlobalMarket();
+  });
 }
 
 /**
@@ -465,6 +486,11 @@ export function getGlobalMarketQuotes(): LiveMarketQuote[] {
     currentGlobalQuotes = COMMODITY_SPECS.map(getLiveQuote);
   }
   return currentGlobalQuotes;
+}
+
+export function isGlobalMarketOnline(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  return navigator.onLine && !isMarketOffline;
 }
 
 /**
