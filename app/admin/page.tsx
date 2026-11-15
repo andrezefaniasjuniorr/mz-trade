@@ -31,6 +31,7 @@ import {
   X,
   Calendar,
   Lock,
+  Unlock,
   FileText,
   Zap,
   Flame,
@@ -50,6 +51,7 @@ import {
 import { useAuth, ADMIN_EMAIL } from '@/context/AuthContext';
 import TapRiseModal from '@/components/TapRiseModal';
 import { getMaputoTodayDate, getMaputoTimeDetails, evaluate21hOrder, MaputoTimeDetails } from '@/lib/maputoTime';
+import { MAX_CHAT_MESSAGES, deleteGroupMessageAndMedia, pruneOldGroupMessages } from '@/lib/chatService';
 import { db } from '@/src/firebase';
 import {
   collection,
@@ -232,6 +234,9 @@ export default function AdminPage() {
     return [];
   });
   const [pinnedChatConfig, setPinnedChatConfig] = useState<any>(null);
+  const [isPinnedExpired, setIsPinnedExpired] = useState<boolean>(false);
+  const [isTogglingGroupLock, setIsTogglingGroupLock] = useState<boolean>(false);
+  const isGroupLocked = Boolean(pinnedChatConfig?.isGroupLocked);
 
   // Usuários
   const [usersList, setUsersList] = useState<UserRecord[]>(() => {
@@ -718,16 +723,17 @@ export default function AdminPage() {
       }).catch(() => {});
     });
 
-    // 8. Ouvir Mensagens do Chat Global em tempo real (taprise_group_messages)
+    // 8. Ouvir Mensagens do Chat Global em tempo real (taprise_group_messages - máximo 20 recentes)
     const chatRef = collection(db, 'taprise_group_messages');
-    const qChat = query(chatRef, orderBy('createdAt', 'desc'), limit(40));
+    const qChat = query(chatRef, orderBy('createdAt', 'desc'), limit(MAX_CHAT_MESSAGES));
+    void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
     const unsubscribeChat = onSnapshot(qChat, (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setAdminChatMessages(list);
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('taprise_offline_admin_chat_msgs', JSON.stringify(list.slice(0, 50)));
+          localStorage.setItem('taprise_offline_admin_chat_msgs', JSON.stringify(list.slice(0, MAX_CHAT_MESSAGES)));
         } catch {}
       }
     }, (e) => console.warn('Erro ao carregar chat admin:', e));
@@ -735,8 +741,17 @@ export default function AdminPage() {
     // 9. Ouvir Mensagem Fixada
     const pinnedDocRef = doc(db, 'admin_config', 'chat');
     const unsubscribePinned = onSnapshot(pinnedDocRef, (snap) => {
-      if (snap.exists()) setPinnedChatConfig(snap.data());
-      else setPinnedChatConfig(null);
+      if (snap.exists()) {
+        const d = snap.data();
+        setPinnedChatConfig(d);
+        const pinnedTimeMs = d?.pinnedAt?.toMillis
+          ? d.pinnedAt.toMillis()
+          : (d?.pinnedAt?.seconds ? d.pinnedAt.seconds * 1000 : (d?.pinnedAt ? new Date(d.pinnedAt).getTime() : 0));
+        setIsPinnedExpired(pinnedTimeMs > 0 && (Date.now() - pinnedTimeMs > 24 * 60 * 60 * 1000));
+      } else {
+        setPinnedChatConfig(null);
+        setIsPinnedExpired(false);
+      }
     }, (e) => console.warn('Erro config fixado:', e));
 
     // 10. Ouvir Dica do Instrutor em tempo real (doc: config/dicaInstrutor)
@@ -1507,6 +1522,7 @@ export default function AdminPage() {
           reactions: {},
           createdAt: serverTimestamp()
         });
+        void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
       } catch (chatErr) {
         console.warn('Erro ao emitir aviso automático no chat:', chatErr);
       }
@@ -1541,6 +1557,7 @@ export default function AdminPage() {
         reactions: {},
         createdAt: serverTimestamp()
       });
+      void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
 
       setChatNoticeText('');
       showToast('Aviso transmitido como SISTEMA no Chat Global com sucesso!', 'success');
@@ -1560,14 +1577,12 @@ export default function AdminPage() {
     if (!chatMsgToDelete) return;
     setIsDeletingChatMsg(true);
     try {
-      await updateDoc(doc(db, 'taprise_group_messages', chatMsgToDelete), {
-        isDeleted: true,
-        text: 'Esta mensagem foi removida pela administração.'
-      });
-      showToast('Mensagem removida com sucesso (soft delete).', 'success');
+      const targetMsg = adminChatMessages.find((m) => m.id === chatMsgToDelete);
+      await deleteGroupMessageAndMedia(db, chatMsgToDelete, targetMsg);
+      showToast('Mensagem e mídias apagadas definitivamente do Firestore!', 'success');
     } catch (e: any) {
       console.error('Erro ao apagar mensagem:', e);
-      showToast('Erro ao remover mensagem.', 'error');
+      showToast('Erro ao apagar mensagem.', 'error');
     } finally {
       setIsDeletingChatMsg(false);
       setChatMsgToDelete(null);
@@ -1581,7 +1596,7 @@ export default function AdminPage() {
         pinnedText: msg.text?.slice(0, 140) || '',
         pinnedAuthor: msg.displayName || msg.userName || 'Investidor',
         pinnedAt: serverTimestamp()
-      });
+      }, { merge: true });
       showToast('Mensagem fixada no topo do grupo!', 'success');
     } catch (e) {
       showToast('Erro ao fixar mensagem.', 'error');
@@ -1595,10 +1610,34 @@ export default function AdminPage() {
         pinnedText: '',
         pinnedAuthor: '',
         pinnedAt: null
-      });
+      }, { merge: true });
       showToast('Mensagem desfixada do topo.', 'info');
     } catch (e) {
       showToast('Erro ao desfixar.', 'error');
+    }
+  };
+
+  const handleToggleGroupLock = async () => {
+    if (!isAdmin || isTogglingGroupLock) return;
+    const nextLocked = !isGroupLocked;
+    setIsTogglingGroupLock(true);
+    try {
+      await setDoc(doc(db, 'admin_config', 'chat'), {
+        isGroupLocked: nextLocked,
+        lockedBy: nextLocked ? (user?.email || ADMIN_EMAIL) : '',
+        lockedUpdatedAt: serverTimestamp()
+      }, { merge: true });
+      showToast(
+        nextLocked
+          ? 'Grupo trancado! Apenas o admin pode enviar no grupo. O chat privado continua aberto.'
+          : 'Grupo destrancado! Todos os utilizadores podem enviar mensagens no grupo.',
+        nextLocked ? 'info' : 'success'
+      );
+    } catch (e) {
+      console.error('Erro ao alternar bloqueio do grupo:', e);
+      showToast('Erro ao alterar estado de bloqueio do grupo.', 'error');
+    } finally {
+      setIsTogglingGroupLock(false);
     }
   };
 
@@ -1688,6 +1727,7 @@ export default function AdminPage() {
         });
 
         chatMessageCreated = true;
+        void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
 
         if (pinInGroupChat) {
           const pinnedTextSnippet = `${titleToPublish}: ${textToPublish}`.slice(0, 140);
@@ -1696,7 +1736,7 @@ export default function AdminPage() {
             pinnedText: pinnedTextSnippet,
             pinnedAuthor: 'Administração TapRise',
             pinnedAt: serverTimestamp()
-          });
+          }, { merge: true });
         }
       }
 
@@ -4266,14 +4306,64 @@ export default function AdminPage() {
                 </p>
               </div>
 
-              <Link
-                href="/chat"
-                prefetch={true}
-                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-2xl text-xs flex items-center gap-2 shadow-lg shadow-blue-600/30 transition shrink-0"
-              >
-                <MessageCircle className="w-4 h-4" />
-                <span>Abrir Chat Ao Vivo em Ecrã Inteiro</span>
-              </Link>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleToggleGroupLock}
+                  disabled={isTogglingGroupLock}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 border transition cursor-pointer disabled:opacity-50 ${
+                    isGroupLocked
+                      ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                      : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40'
+                  }`}
+                >
+                  {isGroupLocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                  <span>{isGroupLocked ? 'Destrancar Grupo' : 'Trancar Grupo'}</span>
+                </button>
+
+                <Link
+                  href="/chat"
+                  prefetch={true}
+                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-2xl text-xs flex items-center gap-2 shadow-lg shadow-blue-600/30 transition shrink-0"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Abrir Chat Ao Vivo em Ecrã Inteiro</span>
+                </Link>
+              </div>
+            </div>
+
+            {/* Estado do Bloqueio do Grupo */}
+            <div className={`rounded-3xl p-4 sm:p-5 border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              isGroupLocked
+                ? 'bg-rose-950/35 border-rose-500/40 text-rose-100'
+                : 'bg-slate-900 border-slate-800 text-slate-200'
+            }`}>
+              <div className="flex items-start sm:items-center gap-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                  isGroupLocked
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                }`}>
+                  {isGroupLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white">
+                    {isGroupLocked ? '🔒 Grupo Atualmente Trancado' : '🔓 Grupo Aberto a Todos'}
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+                    {isGroupLocked
+                      ? 'Apenas a administração pode enviar mensagens no grupo. Os utilizadores continuam a poder falar consigo no Chat Privado do Admin.'
+                      : 'Todos os utilizadores autenticados podem enviar mensagens no grupo. O limite automático mantém apenas as 20 mensagens mais recentes no Firestore.'}
+                  </p>
+                </div>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 self-start sm:self-center ${
+                isGroupLocked
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                {isGroupLocked ? 'Somente Admin no Grupo' : 'Aberto • Máx 20 msgs'}
+              </span>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4349,32 +4439,19 @@ export default function AdminPage() {
                     <Pin className="w-4 h-4 text-amber-400 rotate-45" />
                     Mensagem Atualmente Fixada no Topo
                   </h3>
-                  {(() => {
-                    const pinnedTimeMs = pinnedChatConfig?.pinnedAt?.toMillis
-                      ? pinnedChatConfig.pinnedAt.toMillis()
-                      : (pinnedChatConfig?.pinnedAt?.seconds ? pinnedChatConfig.pinnedAt.seconds * 1000 : (pinnedChatConfig?.pinnedAt ? new Date(pinnedChatConfig.pinnedAt).getTime() : 0));
-                    const isPinnedExpired = pinnedTimeMs > 0 && (Date.now() - pinnedTimeMs > 24 * 60 * 60 * 1000);
-
-                    if (pinnedChatConfig?.pinnedMessageId && !isPinnedExpired) {
-                      return (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          Fixada Ativa (24h)
-                        </span>
-                      );
-                    }
-                    if (pinnedChatConfig?.pinnedMessageId && isPinnedExpired) {
-                      return (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                          Expirada (passou de 24h)
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
-                        Nenhuma
-                      </span>
-                    );
-                  })()}
+                  {pinnedChatConfig?.pinnedMessageId && !isPinnedExpired ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Fixada Ativa (24h)
+                    </span>
+                  ) : pinnedChatConfig?.pinnedMessageId && isPinnedExpired ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      Expirada (passou de 24h)
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
+                      Nenhuma
+                    </span>
+                  )}
                 </div>
 
                 {pinnedChatConfig?.pinnedMessageId ? (
@@ -4514,9 +4591,9 @@ export default function AdminPage() {
       {/* Modal TapRise para exclusão de mensagem no chat */}
       <TapRiseModal
         isOpen={Boolean(chatMsgToDelete)}
-        title="Remover Mensagem do Chat"
-        description="Deseja realmente remover esta mensagem (soft delete) para todos os utilizadores?"
-        confirmText="Remover Mensagem"
+        title="Apagar Mensagem do Chat"
+        description="Deseja realmente apagar esta mensagem e os seus anexos definitivamente do Firestore para todos os utilizadores?"
+        confirmText="Apagar Definitivamente"
         cancelText="Cancelar"
         isLoading={isDeletingChatMsg}
         variant="danger"

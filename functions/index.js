@@ -110,3 +110,64 @@ exports.onUserCreditPayoutCommission = functions.firestore
 
     return batch.commit();
   });
+
+const MAX_CHAT_MESSAGES = 20;
+
+async function cleanupServerMessageMedia(data) {
+  if (!data) return;
+
+  if (typeof data.audioUrl === 'string' && data.audioUrl.startsWith('taprise://audio/')) {
+    const audioId = data.audioUrl.replace('taprise://audio/', '').trim();
+    if (audioId) {
+      await db.collection('chat_audios').doc(audioId).delete().catch(() => {});
+    }
+  }
+}
+
+async function pruneCollectionToMax(colRef, maxKeep, includeReactions = false) {
+  for (let pass = 0; pass < 5; pass++) {
+    const snap = await colRef.orderBy('createdAt', 'desc').limit(100).get();
+    if (snap.size <= maxKeep) break;
+
+    const excessDocs = snap.docs.slice(maxKeep);
+    await Promise.all(
+      excessDocs.map(async (docSnap) => {
+        try {
+          await cleanupServerMessageMedia(docSnap.data());
+          if (includeReactions) {
+            const reactSnap = await docSnap.ref.collection('reactions').get();
+            if (!reactSnap.empty) {
+              const rBatch = db.batch();
+              reactSnap.docs.forEach((r) => rBatch.delete(r.ref));
+              await rBatch.commit();
+            }
+          }
+          await docSnap.ref.delete();
+        } catch (err) {
+          console.warn('Erro ao limpar mensagem antiga no servidor:', err);
+        }
+      })
+    );
+
+    if (snap.size < 100) break;
+  }
+}
+
+exports.onGroupMessageCreatedPrune = functions.firestore
+  .document('taprise_group_messages/{messageId}')
+  .onCreate(async () => {
+    await pruneCollectionToMax(db.collection('taprise_group_messages'), MAX_CHAT_MESSAGES, true);
+    return null;
+  });
+
+exports.onPrivateMessageCreatedPrune = functions.firestore
+  .document('private_chats/{userId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const userId = context.params.userId;
+    await pruneCollectionToMax(
+      db.collection('private_chats').doc(userId).collection('messages'),
+      MAX_CHAT_MESSAGES,
+      false
+    );
+    return null;
+  });

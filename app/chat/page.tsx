@@ -32,7 +32,9 @@ import {
   Pin,
   Flame,
   Mic,
-  Square
+  Square,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import TapRiseModal from '@/components/TapRiseModal';
@@ -68,7 +70,11 @@ import {
   uploadImageWithProgress,
   uploadChatAudio,
   playMessageSound,
-  triggerPushNotification
+  triggerPushNotification,
+  MAX_CHAT_MESSAGES,
+  deleteGroupMessageAndMedia,
+  pruneOldGroupMessages,
+  pruneOldPrivateMessages
 } from '@/lib/chatService';
 import ChatMediaLightbox from '@/components/ChatMediaLightbox';
 import ChatAudioPlayer from '@/components/ChatAudioPlayer';
@@ -873,6 +879,8 @@ export default function ChatPage() {
     pinnedAuthor?: string;
     pinnedAt?: any;
   } | null>(null);
+  const [isGroupLocked, setIsGroupLocked] = useState<boolean>(false);
+  const [isTogglingLock, setIsTogglingLock] = useState<boolean>(false);
 
   // Mapa de fotos de perfil em tempo real para sincronização instantânea
   const [userPhotos, setUserPhotos] = useState<Record<string, string>>({});
@@ -936,6 +944,17 @@ export default function ChatPage() {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
+  const isAdminRef = useRef<boolean>(isAdmin);
+  const isRecordingAudioRef = useRef<boolean>(isRecordingAudio);
+  const recordingTargetRef = useRef<'group' | 'private'>(recordingTarget);
+  const activeSegmentRef = useRef<'grupo' | 'privado'>(activeSegment);
+
+  useEffect(() => {
+    isAdminRef.current = isAdmin;
+    isRecordingAudioRef.current = isRecordingAudio;
+    recordingTargetRef.current = recordingTarget;
+    activeSegmentRef.current = activeSegment;
+  }, [isAdmin, isRecordingAudio, recordingTarget, activeSegment]);
 
   // Refs
   const groupFilePickerRef = useRef<HTMLInputElement | null>(null);
@@ -1053,15 +1072,17 @@ export default function ChatPage() {
     setTimeout(() => performAutoScroll(targetId), 500);
   }, [performAutoScroll]);
 
-  // 1. CARREGAMENTO DO GRUPO (Últimas 50 mensagens em tempo real)
+  // 1. CARREGAMENTO DO GRUPO (Últimas 20 mensagens em tempo real)
   useEffect(() => {
     const messagesRef = collection(db, 'taprise_group_messages');
-    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(50));
+    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(MAX_CHAT_MESSAGES));
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         if (snapshot.empty) {
+          setMessages([]);
+          setCachedMessages([]);
           setIsLoadingMessages(false);
           return;
         }
@@ -1265,6 +1286,34 @@ export default function ChatPage() {
     const unsub = onSnapshot(pinnedRef, (snap) => {
       if (snap.exists()) {
         const d = snap.data();
+        const locked = Boolean(d.isGroupLocked);
+        setIsGroupLocked(locked);
+        if (locked && !isAdminRef.current) {
+          if (isRecordingAudioRef.current && recordingTargetRef.current === 'group') {
+            if (recordingTimerRef.current) {
+              clearInterval(recordingTimerRef.current);
+              recordingTimerRef.current = null;
+            }
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+              try {
+                mediaRecorderRef.current.stop();
+              } catch {}
+            }
+            if (audioStreamRef.current) {
+              audioStreamRef.current.getTracks().forEach((track) => track.stop());
+              audioStreamRef.current = null;
+            }
+            mediaRecorderRef.current = null;
+            audioChunksRef.current = [];
+            setIsRecordingAudio(false);
+            setRecordingDuration(0);
+          }
+          setEditingMessage(null);
+          setReplyingTo(null);
+          if (activeSegmentRef.current === 'grupo') {
+            setPendingImage(null);
+          }
+        }
         if (d.pinnedText) {
           const pinnedTimeMs = d.pinnedAt?.toMillis
             ? d.pinnedAt.toMillis()
@@ -1286,6 +1335,7 @@ export default function ChatPage() {
           setPinnedNotice(null);
         }
       } else {
+        setIsGroupLocked(false);
         setPinnedNotice(null);
       }
     }, (err) => console.warn('Erro ao escutar aviso fixado:', err));
@@ -1310,22 +1360,59 @@ export default function ChatPage() {
     };
   }, []);
 
+  // Limpeza automática de mensagens antigas do grupo ao entrar (máximo 20 recentes)
+  useEffect(() => {
+    if (!user) return;
+    void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
+  }, [user]);
+
   // Desafixar comunicado pelo Administrador diretamente do chat
   const handleUnpinChatMessage = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
       const pinnedRef = doc(db, 'admin_config', 'chat');
-      await updateDoc(pinnedRef, {
+      await setDoc(pinnedRef, {
         pinnedMessageId: null,
         pinnedText: '',
         pinnedAuthor: '',
         pinnedAt: null
-      });
+      }, { merge: true });
       setPinnedNotice(null);
       showToast('Comunicado desafixado do grupo.', 'info');
     } catch (err) {
       console.error('Erro ao desafixar comunicado:', err);
       showToast('Erro ao desafixar comunicado.', 'error');
+    }
+  };
+
+  // Trancar / Destrancar o chat do grupo pelo Administrador
+  const handleToggleGroupLock = async () => {
+    if (!isAdmin || isTogglingLock) return;
+    const nextLocked = !isGroupLocked;
+    setIsTogglingLock(true);
+    try {
+      const chatConfigRef = doc(db, 'admin_config', 'chat');
+      await setDoc(
+        chatConfigRef,
+        {
+          isGroupLocked: nextLocked,
+          lockedBy: nextLocked ? (user?.email || ADMIN_EMAIL) : '',
+          lockedUpdatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+      setIsGroupLocked(nextLocked);
+      showToast(
+        nextLocked
+          ? 'Grupo trancado! Apenas a administração pode enviar no grupo. O privado continua aberto.'
+          : 'Grupo destrancado! Todos os participantes podem enviar mensagens no grupo.',
+        nextLocked ? 'info' : 'success'
+      );
+    } catch (err) {
+      console.error('Erro ao trancar/destrancar grupo:', err);
+      showToast('Falha ao atualizar bloqueio do grupo.', 'error');
+    } finally {
+      setIsTogglingLock(false);
     }
   };
 
@@ -1552,7 +1639,9 @@ export default function ChatPage() {
     }, 0);
 
     const msgsRef = collection(db, 'private_chats', activePrivateTargetUid, 'messages');
-    const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(150));
+    const q = query(msgsRef, orderBy('createdAt', 'desc'), limit(MAX_CHAT_MESSAGES));
+
+    void pruneOldPrivateMessages(db, activePrivateTargetUid, MAX_CHAT_MESSAGES);
 
     const unsub = onSnapshot(
       q,
@@ -1581,6 +1670,7 @@ export default function ChatPage() {
           });
         });
 
+        list.reverse();
         setPrivateMessages(list);
         saveLocalPrivateMessages(activePrivateTargetUid, list);
         setIsLoadingPrivateMessages(false);
@@ -1648,6 +1738,12 @@ export default function ChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (activeSegment === 'grupo' && isGroupLocked && !isAdmin) {
+      e.target.value = '';
+      showToast('O grupo está trancado. Envie a sua foto no chat privado com o Admin.', 'error');
+      return;
+    }
+
     if (!file.type.startsWith('image/')) {
       showToast('Por favor, selecione um ficheiro de imagem válido (JPG, PNG, WebP).', 'error');
       return;
@@ -1700,6 +1796,10 @@ export default function ChatPage() {
 
   const executeSendAudio = useCallback(async (audioBlob: Blob, durationSeconds: number, target: 'group' | 'private') => {
     if (!user) return;
+    if (target === 'group' && isGroupLocked && !isAdmin) {
+      showToast('O grupo está trancado. Use o chat privado com o Admin.', 'error');
+      return;
+    }
     const localUrl = URL.createObjectURL(audioBlob);
 
     if (target === 'group') {
@@ -1760,6 +1860,7 @@ export default function ChatPage() {
           userReactions: {},
           createdAt: serverTimestamp()
         });
+        void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
       } catch (err) {
         console.error('Erro ao enviar áudio no grupo:', err);
         showToast('Falha ao enviar áudio. Tente novamente.', 'error');
@@ -1835,13 +1936,14 @@ export default function ChatPage() {
           },
           { merge: true }
         );
+        void pruneOldPrivateMessages(db, targetUid, MAX_CHAT_MESSAGES);
       } catch (err) {
         console.error('Erro ao enviar áudio no privado:', err);
         showToast('Falha ao enviar áudio.', 'error');
         setPrivateMessages((prev) => prev.filter((m) => m.id !== tempId));
       }
     }
-  }, [user, userProfile, isAdmin, replyingTo, adminSelectedUserId, privateChatsList, showToast]);
+  }, [user, userProfile, isAdmin, isGroupLocked, replyingTo, adminSelectedUserId, privateChatsList, showToast]);
 
   const stopAndSendAudio = useCallback((forcedDuration?: number, targetOverride?: 'group' | 'private') => {
     if (!mediaRecorderRef.current) return;
@@ -2013,6 +2115,11 @@ export default function ChatPage() {
       return;
     }
 
+    if (!isPrivate && isGroupLocked && !isAdmin) {
+      showToast('O grupo está trancado. Envie notas de voz no chat privado com o Admin.', 'error');
+      return;
+    }
+
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       showToast('O seu navegador não suporta gravação ou requer conexão HTTPS.', 'error');
       return;
@@ -2028,7 +2135,7 @@ export default function ChatPage() {
     }
 
     startAudioRecording(targetMode);
-  }, [user, showToast, router, startAudioRecording]);
+  }, [user, isGroupLocked, isAdmin, showToast, router, startAudioRecording]);
 
   // ENVIAR MENSAGEM NO GRUPO (TEXTO, EDIÇÃO OU IMAGEM COM PROGRESSO NO BALÃO)
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -2038,6 +2145,11 @@ export default function ChatPage() {
     if (!user) {
       showToast('Por favor, inicie sessão para participar no grupo.', 'error');
       router.push('/login');
+      return;
+    }
+
+    if (isGroupLocked && !isAdmin) {
+      showToast('O grupo está trancado pela administração. Envie a sua mensagem no Privado do Admin.', 'error');
       return;
     }
 
@@ -2148,6 +2260,7 @@ export default function ChatPage() {
             userReactions: {},
             createdAt: serverTimestamp()
           });
+          void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
         } finally {
           // Limpa mensagem temporária com segurança em qualquer cenário
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -2169,6 +2282,7 @@ export default function ChatPage() {
           userReactions: {},
           createdAt: serverTimestamp()
         });
+        void pruneOldGroupMessages(db, MAX_CHAT_MESSAGES);
 
         setInputText('');
         if (inputRef.current) {
@@ -2308,6 +2422,7 @@ export default function ChatPage() {
         },
         { merge: true }
       );
+      void pruneOldPrivateMessages(db, targetUid, MAX_CHAT_MESSAGES);
 
       setTimeout(() => {
         privateEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2393,11 +2508,11 @@ export default function ChatPage() {
     setIsDeletingMsg(true);
 
     try {
-      const msgRef = doc(db, 'taprise_group_messages', msgId);
-      await deleteDoc(msgRef);
+      const targetMsg = messages.find((m) => m.id === msgId);
+      await deleteGroupMessageAndMedia(db, msgId, targetMsg);
       showToast(isAdmin && !isMyMessage ? 'Mensagem apagada para todos com sucesso.' : 'Sua mensagem foi apagada.', 'success');
     } catch (err: any) {
-      console.warn('Erro ao apagar com deleteDoc, aplicando soft delete:', err);
+      console.warn('Erro ao apagar definitivamente, aplicando soft delete:', err);
       try {
         const msgRef = doc(db, 'taprise_group_messages', msgId);
         await updateDoc(msgRef, {
@@ -2413,10 +2528,14 @@ export default function ChatPage() {
       setIsDeletingMsg(false);
       setMsgToDelete(null);
     }
-  }, [msgToDelete, isAdmin, showToast]);
+  }, [msgToDelete, messages, isAdmin, showToast]);
 
   // Iniciar Edição da própria mensagem
   const handleStartEdit = useCallback((msg: GroupMessage) => {
+    if (isGroupLocked && !isAdmin) {
+      showToast('O grupo está trancado pela administração.', 'error');
+      return;
+    }
     if (msg.uid !== user?.uid) {
       showToast('Apenas o autor pode editar esta mensagem.', 'error');
       return;
@@ -2428,13 +2547,17 @@ export default function ChatPage() {
     setTimeout(() => {
       inputRef.current?.focus();
     }, 60);
-  }, [user, showToast]);
+  }, [user, isGroupLocked, isAdmin, showToast]);
 
   const handleSelectReply = useCallback((msg: GroupMessage) => {
+    if (isGroupLocked && !isAdmin) {
+      showToast('O grupo está trancado. Use o chat privado para falar com o Admin.', 'info');
+      return;
+    }
     setEditingMessage(null);
     setReplyingTo(msg);
     inputRef.current?.focus();
-  }, []);
+  }, [isGroupLocked, isAdmin, showToast]);
 
   // Filtro de conversas privadas para o Admin
   const filteredPrivateChats = useMemo(() => {
@@ -2637,8 +2760,24 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {/* Direita: Avatar */}
+        {/* Direita: Botão Trancar/Destrancar (Admin) + Avatar */}
         <div className="flex items-center space-x-2">
+          {isAdmin && activeSegment === 'grupo' && (
+            <button
+              type="button"
+              onClick={handleToggleGroupLock}
+              disabled={isTogglingLock}
+              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 border transition cursor-pointer disabled:opacity-50 ${
+                isGroupLocked
+                  ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                  : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
+              }`}
+              title={isGroupLocked ? 'Destrancar grupo para permitir mensagens' : 'Trancar grupo (apenas admin pode enviar no grupo)'}
+            >
+              {isGroupLocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isGroupLocked ? 'Destrancar' : 'Trancar'}</span>
+            </button>
+          )}
           <Link
             href="/"
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#2563eb] text-white font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-400 transition cursor-pointer overflow-hidden"
@@ -2703,6 +2842,41 @@ export default function ChatPage() {
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Barra de Grupo Trancado pela Administração */}
+          {isGroupLocked && (
+            <div className="bg-rose-950/85 border-b border-rose-500/40 px-4 py-2 flex items-center justify-between gap-2 text-xs text-rose-200 shrink-0 z-20 shadow-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-300 flex items-center justify-center shrink-0 border border-rose-500/30">
+                  <Lock className="w-3.5 h-3.5" />
+                </div>
+                <p className="text-[11px] sm:text-xs font-medium truncate">
+                  <span className="font-black text-rose-300 uppercase mr-1">Grupo Trancado:</span>
+                  {isAdmin
+                    ? 'Apenas a administração pode enviar mensagens aqui. Privados continuam abertos.'
+                    : 'Apenas a administração pode enviar no grupo. Use o Privado para falar com o Admin.'}
+                </p>
+              </div>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={handleToggleGroupLock}
+                  disabled={isTogglingLock}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] transition shrink-0 cursor-pointer"
+                >
+                  Destrancar
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setActiveSegment('privado')}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] transition shrink-0 cursor-pointer"
+                >
+                  Privado Admin →
+                </button>
+              )}
             </div>
           )}
 
@@ -2813,239 +2987,265 @@ export default function ChatPage() {
 
           {/* Input do Grupo com Ícone [📷] à esquerda + Preview Acoplado + Textarea */}
           <footer className="fixed bottom-0 left-0 right-0 w-full bg-[#0f172a] border-t border-slate-800 z-40 shadow-2xl" style={{ backgroundColor: '#0f172a' }}>
-            {/* Preview de Resposta Ativa */}
-            <AnimatePresence>
-              {replyingTo && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs text-slate-300 shrink-0"
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <Reply className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                    <span className="font-bold text-blue-400">Respondendo a {replyingTo.displayName}:</span>
-                    <span className="text-slate-400 truncate max-w-[200px] sm:max-w-md">{replyingTo.text || '📷 Imagem'}</span>
+            {isGroupLocked && !isAdmin ? (
+              <div className="p-3 sm:p-4 max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 text-slate-300 text-xs">
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                    <Lock className="w-4 h-4" />
                   </div>
-                  <button
-                    onClick={() => setReplyingTo(null)}
-                    className="p-1 hover:text-white text-slate-400 cursor-pointer"
-                    title="Cancelar resposta"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Preview de Edição de Mensagem */}
-            <AnimatePresence>
-              {editingMessage && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 flex items-center justify-between text-xs text-amber-200 shrink-0"
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <Pencil className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="font-bold text-amber-400">A editar mensagem:</span>
-                    <span className="text-slate-300 truncate max-w-[200px] sm:max-w-md">{editingMessage.text}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingMessage(null);
-                      setInputText('');
-                      if (inputRef.current) inputRef.current.style.height = 'auto';
-                    }}
-                    className="p-1 hover:text-white text-slate-400 cursor-pointer"
-                    title="Cancelar edição"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Preview de Imagem selecionada antes de enviar (DIRETAMENTE POR CIMA DA BARRA DE ESCREVER) */}
-            <AnimatePresence>
-              {pendingImage && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="bg-slate-900 border-b border-slate-800 p-3 flex items-center space-x-3 shrink-0"
-                >
-                  <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black shadow-md">
-                    <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => setPendingImage(null)}
-                      className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition cursor-pointer"
-                      title="Cancelar foto"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex-1 text-xs text-slate-300 min-w-0">
-                    <p className="font-bold text-white flex items-center gap-1.5 truncate">
-                      <Camera className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      <span>Foto pronta para envio</span>
+                  <div>
+                    <p className="font-bold text-white text-xs">Grupo trancado pela Administração</p>
+                    <p className="text-[11px] text-slate-400">
+                      O envio no grupo está suspenso, mas ainda pode mandar mensagem no privado do Admin.
                     </p>
-                    <p className="text-[11px] text-slate-400 truncate">Escreva uma legenda abaixo ou envie diretamente.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => handleSendMessage(e as any)}
-                    disabled={isSending}
-                    className="px-3.5 py-2 bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Enviar Foto</span>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="p-3 sm:p-4">
-              {isRecordingAudio && recordingTarget === 'group' ? (
-                <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 bg-slate-950 border border-rose-500/50 rounded-2xl px-4 py-2.5 shadow-lg">
-                  {/* Gravando indicador e tempo */}
-                  <div className="flex items-center space-x-3 min-w-0">
-                    <div className="relative flex items-center justify-center shrink-0">
-                      <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping absolute" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-rose-600 relative" />
-                    </div>
-                    <div className="flex items-center space-x-1 font-mono text-xs font-bold text-white shrink-0">
-                      <span className={recordingDuration >= 80 ? 'text-amber-400' : 'text-rose-400'}>
-                        {formatRecordingTime(recordingDuration)}
-                      </span>
-                      <span className="text-[11px] text-slate-500 font-normal">/ 01:30</span>
-                    </div>
-                    <div className="hidden sm:flex items-center space-x-1 pl-2">
-                      <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:0ms]" />
-                      <span className="w-1 h-5 bg-rose-500 rounded-full animate-bounce [animation-delay:150ms]" />
-                      <span className="w-1 h-2 bg-rose-500/70 rounded-full animate-bounce [animation-delay:300ms]" />
-                      <span className="w-1 h-6 bg-rose-500 rounded-full animate-bounce [animation-delay:75ms]" />
-                      <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:225ms]" />
-                    </div>
-                  </div>
-
-                  {/* Ações: Cancelar e Enviar Áudio */}
-                  <div className="flex items-center space-x-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={cancelAudioRecording}
-                      className="px-3 py-2 rounded-xl text-rose-400 hover:text-white hover:bg-rose-950/60 transition text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                      title="Cancelar gravação"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Cancelar</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => stopAndSendAudio()}
-                      className="w-10 h-10 rounded-xl bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white flex items-center justify-center shadow-md transition cursor-pointer"
-                      title="Enviar nota de voz"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
-              ) : (
-                <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
-                  
-                  {/* Botão [📷] para abrir file picker */}
-                  <button
-                    type="button"
-                    onClick={() => groupFilePickerRef.current?.click()}
-                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
-                    title="Enviar foto (JPG, PNG, WebP máx 3MB)"
-                  >
-                    <Camera className="w-5 h-5 text-blue-400" />
-                  </button>
-
-                  <div className="flex-1 relative flex items-center">
-                    <textarea
-                      ref={inputRef}
-                      rows={1}
-                      value={inputText}
-                      onChange={(e) => {
-                        setInputText(e.target.value);
-                        e.target.style.height = 'auto';
-                        e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage(e as any);
-                        }
-                      }}
-                      placeholder={
-                        editingMessage
-                          ? 'Edite a sua mensagem...'
-                          : pendingImage
-                          ? 'Adicione uma legenda à foto...'
-                          : 'Escreva uma mensagem para o Grupo TapRise...'
-                      }
-                      maxLength={500}
-                      className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
-                    />
-                    {inputText.length > 400 && (
-                      <span className="absolute right-3 bottom-3 text-[10px] font-mono text-amber-400 pointer-events-none">
-                        {500 - inputText.length}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Botão ao lado do texto: Microfone se vazio, Enviar se tiver texto/foto */}
-                  {!inputText.trim() && !pendingImage && !editingMessage ? (
-                    <button
-                      type="button"
-                      onClick={() => handleMicClick(false)}
-                      className="p-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-2xl transition shadow-md shadow-emerald-900/30 flex items-center justify-center cursor-pointer shrink-0 mb-0.5"
-                      title="Gravar nota de voz (máx 01:30)"
+                <button
+                  type="button"
+                  onClick={() => setActiveSegment('privado')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer shrink-0"
+                >
+                  <Shield className="w-4 h-4" />
+                  <span>Mandar Mensagem no Privado</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Preview de Resposta Ativa */}
+                <AnimatePresence>
+                  {replyingTo && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs text-slate-300 shrink-0"
                     >
-                      <Mic className="w-5 h-5" />
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin && !editingMessage)}
-                      className={`px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed mb-0.5 ${
-                        cooldown > 0 && !isAdmin && !editingMessage
-                          ? 'bg-slate-800 text-slate-400 border border-slate-700 opacity-60'
-                          : editingMessage
-                          ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-amber-600/30'
-                          : 'bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white shadow-blue-600/30'
-                      }`}
-                      title={editingMessage ? 'Salvar alterações' : 'Enviar mensagem'}
-                    >
-                      {isSending ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      ) : cooldown > 0 && !isAdmin && !editingMessage ? (
-                        <>
-                          <Clock className="w-4 h-4 text-amber-400 animate-spin" />
-                          <span>{cooldown}s</span>
-                        </>
-                      ) : editingMessage ? (
-                        <>
-                          <Check className="w-4 h-4" />
-                          <span className="hidden sm:inline">Salvar</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" />
-                          <span className="hidden sm:inline">Enviar</span>
-                        </>
-                      )}
-                    </button>
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Reply className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        <span className="font-bold text-blue-400">Respondendo a {replyingTo.displayName}:</span>
+                        <span className="text-slate-400 truncate max-w-[200px] sm:max-w-md">{replyingTo.text || '📷 Imagem'}</span>
+                      </div>
+                      <button
+                        onClick={() => setReplyingTo(null)}
+                        className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                        title="Cancelar resposta"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </motion.div>
                   )}
-                </form>
-              )}
-            </div>
+                </AnimatePresence>
+
+                {/* Preview de Edição de Mensagem */}
+                <AnimatePresence>
+                  {editingMessage && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 flex items-center justify-between text-xs text-amber-200 shrink-0"
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Pencil className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="font-bold text-amber-400">A editar mensagem:</span>
+                        <span className="text-slate-300 truncate max-w-[200px] sm:max-w-md">{editingMessage.text}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingMessage(null);
+                          setInputText('');
+                          if (inputRef.current) inputRef.current.style.height = 'auto';
+                        }}
+                        className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                        title="Cancelar edição"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Preview de Imagem selecionada antes de enviar (DIRETAMENTE POR CIMA DA BARRA DE ESCREVER) */}
+                <AnimatePresence>
+                  {pendingImage && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="bg-slate-900 border-b border-slate-800 p-3 flex items-center space-x-3 shrink-0"
+                    >
+                      <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 shrink-0 bg-black shadow-md">
+                        <img src={pendingImage.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setPendingImage(null)}
+                          className="absolute top-1 right-1 p-0.5 bg-black/80 rounded-full text-white hover:bg-rose-600 transition cursor-pointer"
+                          title="Cancelar foto"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex-1 text-xs text-slate-300 min-w-0">
+                        <p className="font-bold text-white flex items-center gap-1.5 truncate">
+                          <Camera className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>Foto pronta para envio</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400 truncate">Escreva uma legenda abaixo ou envie diretamente.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleSendMessage(e as any)}
+                        disabled={isSending}
+                        className="px-3.5 py-2 bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Enviar Foto</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="p-3 sm:p-4">
+                  {isRecordingAudio && recordingTarget === 'group' ? (
+                    <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 bg-slate-950 border border-rose-500/50 rounded-2xl px-4 py-2.5 shadow-lg">
+                      {/* Gravando indicador e tempo */}
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="relative flex items-center justify-center shrink-0">
+                          <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping absolute" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-600 relative" />
+                        </div>
+                        <div className="flex items-center space-x-1 font-mono text-xs font-bold text-white shrink-0">
+                          <span className={recordingDuration >= 80 ? 'text-amber-400' : 'text-rose-400'}>
+                            {formatRecordingTime(recordingDuration)}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-normal">/ 01:30</span>
+                        </div>
+                        <div className="hidden sm:flex items-center space-x-1 pl-2">
+                          <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:0ms]" />
+                          <span className="w-1 h-5 bg-rose-500 rounded-full animate-bounce [animation-delay:150ms]" />
+                          <span className="w-1 h-2 bg-rose-500/70 rounded-full animate-bounce [animation-delay:300ms]" />
+                          <span className="w-1 h-6 bg-rose-500 rounded-full animate-bounce [animation-delay:75ms]" />
+                          <span className="w-1 h-3 bg-rose-500/80 rounded-full animate-bounce [animation-delay:225ms]" />
+                        </div>
+                      </div>
+
+                      {/* Ações: Cancelar e Enviar Áudio */}
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={cancelAudioRecording}
+                          className="px-3 py-2 rounded-xl text-rose-400 hover:text-white hover:bg-rose-950/60 transition text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          title="Cancelar gravação"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span className="hidden sm:inline">Cancelar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => stopAndSendAudio()}
+                          className="w-10 h-10 rounded-xl bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white flex items-center justify-center shadow-md transition cursor-pointer"
+                          title="Enviar nota de voz"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto flex items-end space-x-2">
+                      
+                      {/* Botão [📷] para abrir file picker */}
+                      <button
+                        type="button"
+                        onClick={() => groupFilePickerRef.current?.click()}
+                        className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-2xl transition cursor-pointer shrink-0 mb-0.5"
+                        title="Enviar foto (JPG, PNG, WebP máx 3MB)"
+                      >
+                        <Camera className="w-5 h-5 text-blue-400" />
+                      </button>
+
+                      <div className="flex-1 relative flex items-center">
+                        <textarea
+                          ref={inputRef}
+                          rows={1}
+                          value={inputText}
+                          onChange={(e) => {
+                            setInputText(e.target.value);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = `${Math.min(130, Math.max(46, e.target.scrollHeight))}px`;
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendMessage(e as any);
+                            }
+                          }}
+                          placeholder={
+                            editingMessage
+                              ? 'Edite a sua mensagem...'
+                              : pendingImage
+                              ? 'Adicione uma legenda à foto...'
+                              : 'Escreva uma mensagem para o Grupo TapRise...'
+                          }
+                          maxLength={500}
+                          className="w-full pl-4 pr-12 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563eb] transition resize-none overflow-y-auto overflow-x-auto max-h-32 min-h-[46px] leading-relaxed break-words whitespace-pre-wrap"
+                        />
+                        {inputText.length > 400 && (
+                          <span className="absolute right-3 bottom-3 text-[10px] font-mono text-amber-400 pointer-events-none">
+                            {500 - inputText.length}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Botão ao lado do texto: Microfone se vazio, Enviar se tiver texto/foto */}
+                      {!inputText.trim() && !pendingImage && !editingMessage ? (
+                        <button
+                          type="button"
+                          onClick={() => handleMicClick(false)}
+                          className="p-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-2xl transition shadow-md shadow-emerald-900/30 flex items-center justify-center cursor-pointer shrink-0 mb-0.5"
+                          title="Gravar nota de voz (máx 01:30)"
+                        >
+                          <Mic className="w-5 h-5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="submit"
+                          disabled={(!inputText.trim() && !pendingImage) || isSending || (cooldown > 0 && !isAdmin && !editingMessage)}
+                          className={`px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs flex items-center space-x-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed mb-0.5 ${
+                            cooldown > 0 && !isAdmin && !editingMessage
+                              ? 'bg-slate-800 text-slate-400 border border-slate-700 opacity-60'
+                              : editingMessage
+                              ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-amber-600/30'
+                              : 'bg-[#2563eb] hover:bg-blue-600 active:bg-blue-700 text-white shadow-blue-600/30'
+                          }`}
+                          title={editingMessage ? 'Salvar alterações' : 'Enviar mensagem'}
+                        >
+                          {isSending ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-white" />
+                          ) : cooldown > 0 && !isAdmin && !editingMessage ? (
+                            <>
+                              <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                              <span>{cooldown}s</span>
+                            </>
+                          ) : editingMessage ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span className="hidden sm:inline">Salvar</span>
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-4 h-4" />
+                              <span className="hidden sm:inline">Enviar</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </form>
+                  )}
+                </div>
+              </>
+            )}
           </footer>
         </div>
       )}

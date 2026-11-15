@@ -14,6 +14,11 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isGroupChatLocked() {
+      return exists(/databases/$(database)/documents/admin_config/chat)
+        && get(/databases/$(database)/documents/admin_config/chat).data.isGroupLocked == true;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if isSignedIn();
@@ -51,9 +56,9 @@ service cloud.firestore {
     // V3 Chat Collections: taprise_group_messages, taprise_presence, taprise_typing
     match /taprise_group_messages/{messageId} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && (isAdmin() || !isGroupChatLocked());
       allow update: if isSignedIn();
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isSignedIn();
 
       match /reactions/{reactionId} {
         allow read, write: if isSignedIn();
@@ -92,10 +97,10 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // Admin configs (market hours, daily, chat pinned message, announcement)
+    // Admin configs (market hours, daily, chat pinned message & group lock, announcement)
     match /admin_config/{configId} {
       allow read: if true;
-      allow write: if isAdmin() || isSignedIn();
+      allow write: if isAdmin();
     }
 
     // Transactions & withdrawals & orders

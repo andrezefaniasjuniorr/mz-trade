@@ -1069,7 +1069,7 @@ export default function Home() {
   useEffect(() => {
     let isInitialMount = true;
     const messagesRef = collection(db, 'taprise_group_messages');
-    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(50));
+    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(20));
 
     const calculateUnread = (docs: any[]) => {
       if (typeof window === 'undefined' || !docs || docs.length === 0) return 0;

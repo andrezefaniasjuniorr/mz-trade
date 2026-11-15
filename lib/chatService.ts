@@ -4,10 +4,15 @@ import {
   orderBy,
   limit,
   getDocs,
+  getDoc,
+  deleteDoc,
+  doc,
   Firestore
 } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
+
+export const MAX_CHAT_MESSAGES = 20;
 
 export interface GroupMessage {
   id: string;
@@ -486,12 +491,12 @@ const STORAGE_KEYS = {
 export function saveLocalGroupMessages(msgs: GroupMessage[]) {
   if (typeof window === 'undefined') return;
   try {
-    const toSave = msgs.slice(-80).map((m) => ({
+    const toSave = msgs.slice(-MAX_CHAT_MESSAGES).map((m) => ({
       ...m,
       createdAt: m.createdAt?.seconds ? { seconds: m.createdAt.seconds } : m.createdAt
     }));
     localStorage.setItem(STORAGE_KEYS.GROUP_MESSAGES, JSON.stringify(toSave));
-    cachedMessages = msgs;
+    cachedMessages = msgs.slice(-MAX_CHAT_MESSAGES);
   } catch (err) {
     console.warn('[TapRise Offline] Failed to persist group messages:', err);
   }
@@ -516,7 +521,7 @@ export function loadLocalGroupMessages(): GroupMessage[] {
 export function saveLocalPrivateMessages(chatUid: string, msgs: PrivateMessage[]) {
   if (typeof window === 'undefined' || !chatUid) return;
   try {
-    const toSave = msgs.slice(-100).map((m) => ({
+    const toSave = msgs.slice(-MAX_CHAT_MESSAGES).map((m) => ({
       ...m,
       createdAt: m.createdAt?.seconds ? { seconds: m.createdAt.seconds } : m.createdAt
     }));
@@ -578,13 +583,13 @@ export function setCachedMessages(msgs: GroupMessage[]) {
 }
 
 /**
- * Prefetch latest 50 messages in background when user is on home/dashboard
+ * Prefetch latest 20 messages in background when user is on home/dashboard
  */
 export async function prefetchLatestChatMessages(db: Firestore): Promise<GroupMessage[]> {
   if (hasPrefetched && cachedMessages.length > 0) return cachedMessages;
   try {
     const colRef = collection(db, 'taprise_group_messages');
-    const q = query(colRef, orderBy('createdAt', 'desc'), limit(50));
+    const q = query(colRef, orderBy('createdAt', 'desc'), limit(MAX_CHAT_MESSAGES));
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) return cachedMessages;
@@ -637,5 +642,148 @@ export async function prefetchLatestChatMessages(db: Firestore): Promise<GroupMe
   } catch (err) {
     console.warn('Erro ao pré-carregar chat:', err);
     return cachedMessages;
+  }
+}
+
+/**
+ * Remove mídias associadas a uma mensagem (áudios em chat_audios + arquivos no Storage)
+ */
+export async function cleanupMessageMedia(
+  db: Firestore,
+  data: { audioUrl?: string; imageUrl?: string }
+): Promise<void> {
+  if (!data) return;
+
+  if (data.audioUrl) {
+    if (data.audioUrl.startsWith('taprise://audio/')) {
+      const audioId = data.audioUrl.replace('taprise://audio/', '').trim();
+      if (audioId) {
+        try {
+          const audioSnap = await getDoc(doc(db, 'chat_audios', audioId));
+          if (audioSnap.exists()) {
+            const storageUrl = audioSnap.data()?.storageUrl;
+            if (storageUrl && storage && typeof storageUrl === 'string' && storageUrl.startsWith('http')) {
+              await deleteObject(ref(storage, storageUrl)).catch(() => {});
+            }
+          }
+        } catch {}
+        await deleteDoc(doc(db, 'chat_audios', audioId)).catch(() => {});
+        if (storage) {
+          await deleteObject(ref(storage, `chat_audios/${audioId}.webm`)).catch(() => {});
+        }
+      }
+    } else if (data.audioUrl.startsWith('http') && data.audioUrl.includes('firebasestorage') && storage) {
+      await deleteObject(ref(storage, data.audioUrl)).catch(() => {});
+    }
+  }
+
+  if (data.imageUrl && data.imageUrl.startsWith('http') && data.imageUrl.includes('firebasestorage') && storage) {
+    await deleteObject(ref(storage, data.imageUrl)).catch(() => {});
+  }
+}
+
+/**
+ * Apaga permanentemente uma mensagem do grupo e todos os seus anexos/reações no Firestore e Storage.
+ */
+export async function deleteGroupMessageAndMedia(
+  db: Firestore,
+  msgId: string,
+  msgData?: { audioUrl?: string; imageUrl?: string }
+): Promise<void> {
+  let mediaData = msgData;
+  if (!mediaData) {
+    try {
+      const snap = await getDoc(doc(db, 'taprise_group_messages', msgId));
+      if (snap.exists()) {
+        mediaData = snap.data() as { audioUrl?: string; imageUrl?: string };
+      }
+    } catch {}
+  }
+
+  try {
+    const reactionsSnap = await getDocs(collection(db, 'taprise_group_messages', msgId, 'reactions'));
+    await Promise.all(reactionsSnap.docs.map((rDoc) => deleteDoc(rDoc.ref).catch(() => {})));
+  } catch {}
+
+  if (mediaData) {
+    await cleanupMessageMedia(db, mediaData);
+  }
+
+  await deleteDoc(doc(db, 'taprise_group_messages', msgId));
+}
+
+/**
+ * Mantém no máximo `maxKeep` (20) mensagens recentes no grupo (taprise_group_messages).
+ * Todas as mensagens mais antigas (texto, áudio, imagem, aviso) são apagadas do Firestore e Storage.
+ */
+export async function pruneOldGroupMessages(
+  db: Firestore,
+  maxKeep: number = MAX_CHAT_MESSAGES
+): Promise<void> {
+  try {
+    const colRef = collection(db, 'taprise_group_messages');
+    // Limpa até 5 lotes caso exista acúmulo antigo no Firestore
+    for (let batch = 0; batch < 5; batch++) {
+      const snap = await getDocs(query(colRef, orderBy('createdAt', 'desc'), limit(100)));
+      if (snap.docs.length <= maxKeep) break;
+
+      const excessDocs = snap.docs.slice(maxKeep);
+      let deletedCount = 0;
+
+      await Promise.all(
+        excessDocs.map(async (docSnap) => {
+          try {
+            await deleteGroupMessageAndMedia(
+              db,
+              docSnap.id,
+              docSnap.data() as { audioUrl?: string; imageUrl?: string }
+            );
+            deletedCount++;
+          } catch {
+            // Ignora falha pontual de permissão em mensagens individuais
+          }
+        })
+      );
+
+      if (deletedCount === 0 || snap.docs.length < 100) break;
+    }
+  } catch (err) {
+    console.warn('Erro ao limpar mensagens antigas do grupo:', err);
+  }
+}
+
+/**
+ * Mantém no máximo `maxKeep` (20) mensagens recentes em cada conversa privada (private_chats/{uid}/messages).
+ * Apaga as mais antigas do Firestore e Storage.
+ */
+export async function pruneOldPrivateMessages(
+  db: Firestore,
+  targetUid: string,
+  maxKeep: number = MAX_CHAT_MESSAGES
+): Promise<void> {
+  if (!targetUid) return;
+  try {
+    const colRef = collection(db, 'private_chats', targetUid, 'messages');
+    for (let batch = 0; batch < 5; batch++) {
+      const snap = await getDocs(query(colRef, orderBy('createdAt', 'desc'), limit(100)));
+      if (snap.docs.length <= maxKeep) break;
+
+      const excessDocs = snap.docs.slice(maxKeep);
+      let deletedCount = 0;
+
+      await Promise.all(
+        excessDocs.map(async (docSnap) => {
+          try {
+            await cleanupMessageMedia(db, docSnap.data() as { audioUrl?: string; imageUrl?: string });
+            await deleteDoc(docSnap.ref);
+            deletedCount++;
+          } catch {}
+        })
+      );
+
+      if (deletedCount === 0 || snap.docs.length < 100) break;
+    }
+  } catch (err) {
+    console.warn('Erro ao limpar mensagens antigas do chat privado:', err);
   }
 }
